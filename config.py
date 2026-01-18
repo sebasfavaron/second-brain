@@ -23,6 +23,14 @@ AUDIT_FILE = BRAIN_DIR / "audit.json"
 STATE_FILE = BRAIN_DIR / "state.json"
 CORRECTIONS_QUEUE = BRAIN_DIR / "corrections_queue.json"
 
+# Context files for enriched classification
+CONTEXT_FILES = {
+    "admin": BRAIN_DIR / "admin_context.md",
+    "people": BRAIN_DIR / "people_context.md",
+    "projects": BRAIN_DIR / "projects_context.md",
+    "ideas": BRAIN_DIR / "ideas_context.md",
+}
+
 # Categories
 CATEGORIES = ["people", "projects", "ideas", "admin"]
 
