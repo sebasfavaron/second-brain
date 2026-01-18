@@ -1,1 +1,8 @@
 venv/
+.env
+*.log
+__pycache__/
+*.pyc
+
+# Keep brain/*.json structure but allow ignoring data if needed
+# brain/*.json
