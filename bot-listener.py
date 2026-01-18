@@ -141,6 +141,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             details={"reasoning": result.get("reasoning")},
         )
 
+        # Enrich context for high-confidence classifications
+        if category != "inbox" and result.get("confidence", 0) >= CONFIDENCE_THRESHOLD:
+            try:
+                from context_manager import enrich_context
+                enrich_context(category, entry)
+                logger.info(f"Enriched {category} context")
+            except Exception as e:
+                logger.warning(f"Context enrichment failed: {e}")
+
         # Send confirmation
         confirmation = format_confirmation(entry, result)
         sent = await message.reply_text(confirmation)
