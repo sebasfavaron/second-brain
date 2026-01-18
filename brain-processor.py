@@ -143,60 +143,63 @@ def process_pending_corrections() -> int:
     return processed
 
 
-async def check_digest_time(bot: Bot, chat_id: int) -> None:
-    """Check if it's time to send a digest."""
-    now = datetime.now()
-
-    # Check if we should send a digest
-    if now.hour == DIGEST_HOUR:
-        last_digest = get_state("last_digest_time")
-        if last_digest:
-            last_time = datetime.fromisoformat(last_digest)
-            # Only send if we haven't sent one in the last 20 hours
-            if now - last_time < timedelta(hours=20):
-                return
-
-        await send_digest(bot, chat_id)
-
-
-async def main_loop(chat_id: int):
-    """Main processing loop."""
+async def run_digest(chat_id: int) -> None:
+    """Run digest once and exit."""
     if not TELEGRAM_TOKEN:
         raise ValueError("TELEGRAM_TOKEN not set")
 
     bot = Bot(token=TELEGRAM_TOKEN)
     init_storage()
 
-    logger.info(f"Brain processor started. Digest chat_id={chat_id}")
+    # Check if we've already sent today
+    last_digest = get_state("last_digest_time")
+    if last_digest:
+        last_time = datetime.fromisoformat(last_digest)
+        now = datetime.now()
+        if now - last_time < timedelta(hours=20):
+            logger.info("Digest already sent in last 20 hours, skipping")
+            return
 
-    while True:
-        try:
-            # Process pending corrections
-            processed = process_pending_corrections()
-            if processed:
-                logger.info(f"Processed {processed} corrections")
+    await send_digest(bot, chat_id)
+    logger.info(f"Digest sent to {chat_id}")
 
-            # Check if digest time
-            await check_digest_time(bot, chat_id)
 
-        except Exception as e:
-            logger.error(f"Loop error: {e}")
-
-        # Sleep for 5 minutes
-        await asyncio.sleep(300)
+async def run_corrections() -> None:
+    """Process corrections once and exit."""
+    init_storage()
+    processed = process_pending_corrections()
+    if processed:
+        logger.info(f"Processed {processed} corrections")
+    else:
+        logger.info("No corrections to process")
 
 
 def main():
     """Entry point."""
     import sys
+    import argparse
 
-    if len(sys.argv) < 2:
-        print("Usage: python brain-processor.py <chat_id>")
-        print("  chat_id: Your Telegram chat ID for receiving digests")
+    parser = argparse.ArgumentParser(description="Brain processor for Second Brain")
+    parser.add_argument("chat_id", type=int, help="Telegram chat ID for digests")
+    parser.add_argument("--digest", action="store_true", help="Send daily digest")
+    parser.add_argument("--corrections", action="store_true", help="Process corrections queue")
+
+    args = parser.parse_args()
+
+    # Default to both if neither specified
+    if not args.digest and not args.corrections:
+        args.digest = True
+        args.corrections = True
+
+    try:
+        if args.corrections:
+            asyncio.run(run_corrections())
+
+        if args.digest:
+            asyncio.run(run_digest(args.chat_id))
+    except Exception as e:
+        logger.error(f"Error: {e}")
         sys.exit(1)
-
-    chat_id = int(sys.argv[1])
-    asyncio.run(main_loop(chat_id))
 
 
 if __name__ == "__main__":
