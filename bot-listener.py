@@ -56,14 +56,24 @@ def format_confirmation(entry: dict, result: dict) -> str:
     )
 
 
-def parse_correction(text: str) -> str | None:
-    """Parse user reply to extract category for correction."""
-    text = text.lower().strip()
+def parse_correction(text: str) -> tuple[str | None, str | None]:
+    """
+    Parse user reply to extract category and optional clarifying context.
+    Returns (category, additional_context).
+    """
+    text_lower = text.lower().strip()
+    original_text = text.strip()
 
     # Direct category match
     for cat in CATEGORIES + ["inbox"]:
-        if text == cat or text.startswith(cat):
-            return cat
+        if text_lower == cat:
+            return cat, None
+        if text_lower.startswith(cat):
+            # Extract text after category (separated by space, dash, colon, etc)
+            remainder = original_text[len(cat):].strip()
+            if remainder and remainder[0] in ['-', ':', ',']:
+                remainder = remainder[1:].strip()
+            return cat, remainder if remainder else None
 
     # Common aliases
     aliases = {
@@ -76,10 +86,13 @@ def parse_correction(text: str) -> str | None:
         "note": "ideas",
     }
     for alias, cat in aliases.items():
-        if text.startswith(alias):
-            return cat
+        if text_lower.startswith(alias):
+            remainder = original_text[len(alias):].strip()
+            if remainder and remainder[0] in ['-', ':', ',']:
+                remainder = remainder[1:].strip()
+            return cat, remainder if remainder else None
 
-    return None
+    return None, None
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -151,8 +164,8 @@ async def handle_correction(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     logger.info(f"Correction attempt: {text} for reply to: {original_text[:30]}")
 
-    # Parse the correction category
-    new_category = parse_correction(text)
+    # Parse the correction category and any additional context
+    new_category, additional_context = parse_correction(text)
 
     if not new_category:
         await message.reply_text(
@@ -173,8 +186,8 @@ async def handle_correction(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await message.reply_text(f"Already in {new_category}")
                 return
 
-            # Move the entry
-            moved = move_entry(entry["id"], old_category, new_category)
+            # Move the entry with additional context if provided
+            moved = move_entry(entry["id"], old_category, new_category, additional_context)
 
             if moved:
                 # Log correction
@@ -182,10 +195,14 @@ async def handle_correction(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     action="corrected",
                     item_id=entry["id"],
                     category=new_category,
-                    details={"from_category": old_category},
+                    details={
+                        "from_category": old_category,
+                        "added_context": bool(additional_context),
+                    },
                 )
 
-                await message.reply_text(f"Moved to {new_category}")
+                context_msg = " (with clarification)" if additional_context else ""
+                await message.reply_text(f"Moved to {new_category}{context_msg}")
                 logger.info(f"Corrected: {entry['id']} from {old_category} to {new_category}")
                 return
 
