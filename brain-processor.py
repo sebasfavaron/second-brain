@@ -64,8 +64,9 @@ def generate_digest() -> str:
         if count > 0:
             lines.append(f"{category.title()}: {count} new")
             for entry in new_entries[:3]:
-                preview = entry.get("raw_message", "")[:40]
-                lines.append(f"  - {preview}...")
+                message = entry.get("raw_message", "")
+                lines.append(f"  - {message}")
+            lines.append("")  # Blank line after each section
 
     if total_new == 0:
         lines.append("No new entries since last digest.")
@@ -99,9 +100,9 @@ async def send_inbox_reminder(bot: Bot, chat_id: int) -> None:
     ]
 
     for entry in inbox[:5]:
-        preview = entry.get("raw_message", "")[:50]
+        message = entry.get("raw_message", "")
         conf = int(entry.get("confidence", 0) * 100)
-        lines.append(f"- {preview}... ({conf}%)")
+        lines.append(f"- {message} ({conf}%)")
 
     if len(inbox) > 5:
         lines.append(f"  ... and {len(inbox) - 5} more")
