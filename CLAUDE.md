@@ -18,8 +18,14 @@ pip install python-telegram-bot anthropic python-dotenv
 # Run the bot (main entry point)
 python bot-listener.py
 
-# Run digest processor (optional background service)
-python brain-processor.py <your_chat_id>
+# Run digest manually (normally via cron)
+python brain-processor.py <your_chat_id> --digest
+
+# Process corrections manually (normally via cron)
+python brain-processor.py <your_chat_id> --corrections
+
+# Bootstrap context files from existing entries
+python bootstrap_contexts.py
 ```
 
 ## Setup
@@ -47,10 +53,12 @@ bot-listener.py  ---> classifier.py (Claude API)
 | File | Purpose |
 |------|---------|
 | `bot-listener.py` | Telegram bot - receives messages, classifies, stores, sends confirmations |
-| `brain-processor.py` | Background service - daily digests, correction queue processing |
-| `classifier.py` | Claude API wrapper - message classification with confidence |
+| `brain-processor.py` | Cron-triggered - daily digests, correction queue processing |
+| `classifier.py` | Claude API wrapper - message classification with context enrichment |
+| `context_manager.py` | Context loading, bootstrapping, enrichment for classification |
 | `storage.py` | JSON CRUD - entries, audit log, corrections queue, state |
 | `config.py` | Paths, categories, thresholds, env loading |
+| `bootstrap_contexts.py` | One-time script to create context files from existing entries |
 
 ### Data Files (brain/)
 
@@ -64,6 +72,7 @@ bot-listener.py  ---> classifier.py (Claude API)
 | `audit.json` | All classification events |
 | `state.json` | Digest timestamps, etc. |
 | `corrections_queue.json` | Pending corrections |
+| `*_context.md` | Context summaries for enriched classification (auto-updated) |
 
 ## Entry Schema
 
@@ -105,3 +114,5 @@ bot-listener.py  ---> classifier.py (Claude API)
 - Token must be in `.env`, not hardcoded
 - Reply-based correction only works when replying to the bot's confirmation message
 - brain-processor.py needs chat_id arg for digest delivery
+- Digests/corrections run via cron, not continuous service
+- Context enrichment happens automatically after high-confidence classifications
