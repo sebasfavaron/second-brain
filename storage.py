@@ -94,8 +94,8 @@ def get_entry_by_message_id(chat_id: int, message_id: int) -> Optional[tuple[dic
     return None
 
 
-def move_entry(entry_id: str, from_category: str, to_category: str) -> Optional[dict]:
-    """Move entry from one category to another."""
+def move_entry(entry_id: str, from_category: str, to_category: str, additional_context: str = None) -> Optional[dict]:
+    """Move entry from one category to another, optionally adding clarifying context."""
     # Load source
     from_path = STORAGE_FILES.get(from_category)
     to_path = STORAGE_FILES.get(to_category)
@@ -120,6 +120,11 @@ def move_entry(entry_id: str, from_category: str, to_category: str) -> Optional[
     entry["corrected_from"] = from_category
     entry["category"] = to_category
     entry["processed_at"] = datetime.now().isoformat()
+
+    # Combine original message with clarifying context if provided
+    if additional_context and additional_context.strip():
+        original_msg = entry.get("raw_message", "")
+        entry["raw_message"] = f"{original_msg}\n[Clarification: {additional_context.strip()}]"
 
     # Add to destination
     to_entries.append(entry)
