@@ -37,9 +37,13 @@ Rules:
 """
 
 
-def classify_message(message: str) -> dict:
+def classify_message(message: str, enable_context: bool = True) -> dict:
     """
     Classify a message using Claude.
+
+    Args:
+        message: The message to classify
+        enable_context: Whether to load and inject historical context
 
     Returns:
         dict with keys: category, confidence, reasoning
@@ -51,12 +55,32 @@ def classify_message(message: str) -> dict:
             "reasoning": "Empty message"
         }
 
+    # Prepare user content with optional context
+    user_content = message
+
+    if enable_context:
+        try:
+            from context_manager import load_context
+            context_sections = []
+            for category in CATEGORIES:
+                ctx = load_context(category)
+                if ctx and len(ctx.strip()) > 20:
+                    context_sections.append(f"## {category.title()} Context\n{ctx}")
+
+            if context_sections:
+                context_block = "\n\n".join(context_sections)
+                user_content = f"[BACKGROUND CONTEXT]\n{context_block}\n\n[MESSAGE TO CLASSIFY]\n{message}"
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Context load failed: {e}")
+
     try:
         response = get_client().messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=200,
             system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": message}]
+            messages=[{"role": "user", "content": user_content}]
         )
 
         content = response.content[0].text.strip()
