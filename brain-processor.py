@@ -8,6 +8,7 @@ Background service that handles:
 """
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta
 
 from telegram import Bot
@@ -16,6 +17,7 @@ from config import (
     TELEGRAM_TOKEN,
     CATEGORIES,
     DIGEST_HOUR,
+    ANTHROPIC_API_KEY,
 )
 from storage import (
     init_storage,
@@ -36,6 +38,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def escape_md_v2(text: str) -> str:
+    """Escape text for Telegram MarkdownV2."""
+    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
+
+
 def get_entries_since(category: str, since: datetime) -> list:
     """Get entries added since a given time."""
     entries = get_all_entries(category)
@@ -45,45 +52,178 @@ def get_entries_since(category: str, since: datetime) -> list:
     ]
 
 
-def generate_digest() -> str:
-    """Generate a digest of recent activity."""
+def collect_digest_data() -> dict:
+    """Collect digest data without formatting."""
     last_digest = get_state("last_digest_time")
     if last_digest:
         since = datetime.fromisoformat(last_digest)
     else:
         since = datetime.now() - timedelta(days=1)
 
-    lines = ["Daily Digest", "=" * 20, ""]
+    data = {
+        "since": since.isoformat(),
+        "categories": {},
+        "inbox_count": 0,
+        "contexts": {}
+    }
+
+    # Load contexts for AI understanding
+    try:
+        from context_manager import load_context
+        for category in CATEGORIES:
+            ctx = load_context(category)
+            if ctx and len(ctx.strip()) > 20:
+                data["contexts"][category] = ctx
+    except Exception as e:
+        logger.warning(f"Failed to load contexts: {e}")
+
+    # Collect entries per category
+    for category in CATEGORIES + ["inbox"]:
+        entries = get_entries_since(category, since)
+        if entries:
+            data["categories"][category] = [
+                {
+                    "message": e.get("raw_message", ""),
+                    "confidence": e.get("confidence", 0),
+                    "timestamp": e.get("timestamp", ""),
+                    "corrected_from": e.get("corrected_from")
+                }
+                for e in entries
+            ]
+
+    # Inbox count
+    inbox = get_all_entries("inbox")
+    data["inbox_count"] = len(inbox)
+
+    return data
+
+
+def generate_simple_digest(data: dict) -> str:
+    """Fallback simple digest format."""
+    lines = ["*Daily Digest*", ""]
 
     total_new = 0
-    for category in CATEGORIES + ["inbox"]:
-        new_entries = get_entries_since(category, since)
-        count = len(new_entries)
+    for category, entries in data["categories"].items():
+        count = len(entries)
         total_new += count
 
         if count > 0:
-            lines.append(f"{category.title()}: {count} new")
-            for entry in new_entries[:3]:
-                message = entry.get("raw_message", "")
-                lines.append(f"  - {message}")
-            lines.append("")  # Blank line after each section
+            lines.append(f"*{category.title()}*: {count} new")
+            for entry in entries[:3]:
+                msg = escape_md_v2(entry['message'])
+                lines.append(f"  {msg}")
+            lines.append("")
 
     if total_new == 0:
-        lines.append("No new entries since last digest.")
+        lines.append("No new entries since last digest\\.")
 
-    # Check inbox for items needing review
-    inbox = get_all_entries("inbox")
-    if inbox:
-        lines.append("")
-        lines.append(f"Inbox: {len(inbox)} items need review")
+    if data["inbox_count"] > 0:
+        lines.append(f"*Inbox*: {data['inbox_count']} items need review")
 
     return "\n".join(lines)
 
 
+def generate_ai_digest(data: dict) -> str:
+    """Generate AI-enhanced digest from structured data."""
+    if not any(data["categories"].values()):
+        return "*Daily Digest*\n\nNo new entries since last digest\\."
+
+    # Build prompt with context
+    prompt_parts = ["You are a productivity assistant analyzing daily digest data."]
+
+    # Add context sections
+    if data["contexts"]:
+        prompt_parts.append("\n[BACKGROUND CONTEXT]")
+        for category, context in data["contexts"].items():
+            prompt_parts.append(f"\n## {category.title()}")
+            prompt_parts.append(context)
+
+    prompt_parts.append("\n[NEW ENTRIES TO DIGEST]")
+
+    # Add entries by category
+    for category, entries in data["categories"].items():
+        if entries:
+            prompt_parts.append(f"\n{category.title()} ({len(entries)} new):")
+            for entry in entries:
+                prompt_parts.append(f"  - {entry['message']}")
+                if entry['confidence'] < 0.7:
+                    prompt_parts.append(f"    (low confidence: {int(entry['confidence']*100)}%)")
+
+    if data["inbox_count"] > 0:
+        prompt_parts.append(f"\nInbox: {data['inbox_count']} items need review")
+
+    prompt = "\n".join(prompt_parts)
+
+    system_prompt = """Create a prioritized daily digest summary for Telegram.
+
+RULES:
+1. Prioritize by urgency/importance (deadlines, appointments, follow-ups first)
+2. Group related items logically
+3. Include full context from messages - don't truncate
+4. Make intelligent assumptions about priorities (meetings > ideas, deadlines > notes)
+5. Use sections: "High Priority", "Today", "This Week", "Notes"
+6. Call out inbox items that need classification
+7. Suggest next actions when relevant
+8. Keep tone helpful and actionable
+
+FORMATTING (Telegram MarkdownV2):
+- Start with "Daily Digest" as first line
+- Use *bold* for section headers
+- Use plain text for all message content (no special formatting)
+- Keep it clean and scannable
+- Do NOT use markdown lists, headings (#), or other unsupported syntax
+- Each section separated by blank line"""
+
+    try:
+        from anthropic import Anthropic
+
+        if not ANTHROPIC_API_KEY:
+            raise ValueError("ANTHROPIC_API_KEY not set")
+
+        client = Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            system=system_prompt,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        ai_text = response.content[0].text.strip()
+
+        # Escape the AI output for MarkdownV2
+        # First, extract any bold markers the AI might have used
+        # Then escape everything else
+        lines = []
+        for line in ai_text.split('\n'):
+            if line.strip().startswith('*') and line.strip().endswith('*') and line.count('*') == 2:
+                # This is a bold section header - keep it
+                lines.append(line)
+            else:
+                # Escape regular content
+                lines.append(escape_md_v2(line))
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.error(f"AI digest failed: {e}")
+        # Fallback to simple format
+        return generate_simple_digest(data)
+
+
 async def send_digest(bot: Bot, chat_id: int) -> None:
     """Send digest to a specific chat."""
-    digest = generate_digest()
-    await bot.send_message(chat_id=chat_id, text=digest)
+    # Collect structured data
+    data = collect_digest_data()
+
+    # Generate AI-enhanced digest
+    digest = generate_ai_digest(data)
+
+    # Send with MarkdownV2 formatting
+    await bot.send_message(
+        chat_id=chat_id,
+        text=digest,
+        parse_mode="MarkdownV2"
+    )
     set_state("last_digest_time", datetime.now().isoformat())
     logger.info(f"Sent digest to {chat_id}")
 
