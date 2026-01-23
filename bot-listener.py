@@ -282,18 +282,65 @@ async def execute_action(message, intent: dict, reply_context: dict = None) -> N
             await message.reply_text("Failed to move entry")
 
     elif action == "delete":
-        if not reply_context or not reply_context.get("entry"):
+        entry = None
+        category = None
+
+        # First, check if we have reply context
+        if reply_context and reply_context.get("entry"):
+            entry = reply_context["entry"]
+            category = reply_context["category"]
+        else:
+            # No reply context, search for recent entries matching keywords
+            keywords = message.text.lower().split()
+            # Remove common words that don't help identify entries
+            stop_words = {"no", "hace", "falta", "clasificar", "delete", "remove", "borrar", "eliminar"}
+            keywords = [k for k in keywords if k not in stop_words and len(k) > 2]
+
+            if keywords:
+                # Search recent entries across all categories
+                matches = []
+                for cat in CATEGORIES + ["inbox"]:
+                    try:
+                        entries = get_recent_entries(cat, limit=10)
+                        for e in entries:
+                            msg_lower = e.get('raw_message', '').lower()
+                            # Check if any keyword matches
+                            if any(kw in msg_lower for kw in keywords):
+                                matches.append((e, cat))
+                    except:
+                        pass
+
+                if len(matches) == 1:
+                    # Found exactly one match
+                    entry, category = matches[0]
+                    logger.info(f"Found matching entry for deletion: {entry['id']}")
+                elif len(matches) > 1:
+                    # Multiple matches, show them to user
+                    match_list = "\n".join([
+                        f"- [{m[1]}] {m[0].get('raw_message', '')[:50]}..."
+                        for m in matches[:5]
+                    ])
+                    await message.reply_text(
+                        f"Found {len(matches)} matching entries:\n{match_list}\n\n"
+                        f"Reply to my original classification message to delete a specific entry."
+                    )
+                    return
+                else:
+                    # No matches found
+                    search_terms = ", ".join(keywords)
+                    await message.reply_text(f"No recent entry found matching: {search_terms}")
+                    return
+
+        if not entry:
             await message.reply_text("No entry found to delete")
             return
 
-        entry = reply_context["entry"]
-        category = reply_context["category"]
-
+        # Delete the entry
         deleted = delete_entry(entry["id"], category)
         if deleted:
             log_audit("deleted", entry["id"], category,
                      details={"reasoning": intent.get("reasoning")})
-            await message.reply_text("Entry deleted")
+            await message.reply_text(f"Entry deleted: {entry.get('raw_message', '')[:50]}...")
             logger.info(f"Deleted: {entry['id']} from {category}")
         else:
             await message.reply_text("Failed to delete entry")
