@@ -115,16 +115,15 @@ async def process_message_with_agent(chat_id: int, user_message: str, telegram_m
                 tool_name = tool_use.name
                 tool_input = tool_use.input
 
-                logger.info(f"Executing tool: {tool_name} with input: {tool_input}")
-
-                # Execute the tool
-                result = execute_tool(tool_name, tool_input)
-
-                # Pass chat_id and message_id for create_entry
+                # Pass chat_id and message_id for create_entry BEFORE executing
                 if tool_name == "create_entry":
                     tool_input["chat_id"] = chat_id
                     tool_input["message_id"] = telegram_message_id
-                    result = execute_tool(tool_name, tool_input)
+
+                logger.info(f"Executing tool: {tool_name} with input: {tool_input}")
+
+                # Execute the tool once
+                result = execute_tool(tool_name, tool_input)
 
                 logger.info(f"Tool result: {result}")
 
