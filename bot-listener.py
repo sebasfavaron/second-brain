@@ -138,6 +138,15 @@ async def process_message_with_agent(chat_id: int, user_message: str, telegram_m
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
 
+            # Save tool use to conversation history (serialize content blocks)
+            serialized_content = [
+                {"type": block.type, "text": block.text} if hasattr(block, "text")
+                else {"type": block.type, "id": block.id, "name": block.name, "input": block.input}
+                for block in response.content
+            ]
+            add_message(chat_id, "assistant", serialized_content)
+            add_message(chat_id, "user", tool_results)
+
             # Continue conversation with tool results
             response = get_client().messages.create(
                 model="claude-sonnet-4-20250514",
@@ -151,8 +160,13 @@ async def process_message_with_agent(chat_id: int, user_message: str, telegram_m
         text_blocks = [block.text for block in response.content if hasattr(block, "text")]
         assistant_response = "\n".join(text_blocks) if text_blocks else "Lo siento, no pude procesar eso."
 
-        # Store assistant response in history
-        add_message(chat_id, "assistant", assistant_response)
+        # Store final assistant response in history (serialize content blocks)
+        serialized_final = [
+            {"type": block.type, "text": block.text} if hasattr(block, "text")
+            else {"type": block.type, "id": block.id, "name": block.name, "input": block.input}
+            for block in response.content
+        ]
+        add_message(chat_id, "assistant", serialized_final)
 
         return assistant_response
 
