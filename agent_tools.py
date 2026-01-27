@@ -263,6 +263,24 @@ TOOL_DEFINITIONS = [
         }
     },
     {
+        "name": "complete_reminder",
+        "description": "Mark a reminder as completed. Use when the user says they've done something or asks to complete/dismiss a reminder.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "reminder_id": {
+                    "type": "string",
+                    "description": "UUID of the reminder to complete"
+                },
+                "note": {
+                    "type": "string",
+                    "description": "Optional note about why it was completed"
+                }
+            },
+            "required": ["reminder_id"]
+        }
+    },
+    {
         "name": "link_entries",
         "description": "Create a cross-reference link between a journal entry and a knowledge entry. Use for HYBRID messages that have both diary content and extractable facts.",
         "input_schema": {
@@ -504,7 +522,7 @@ def delete_entry(entry_id: str, category: str) -> Dict:
 
 
 def write_journal(content: str, timestamp: Optional[str] = None, linked_entries: Optional[List[str]] = None) -> Dict:
-    """Write a journal entry."""
+    """Write a journal entry, then check pending reminders for auto-completion."""
     try:
         # Parse timestamp if provided
         dt = None
@@ -518,6 +536,31 @@ def write_journal(content: str, timestamp: Optional[str] = None, linked_entries:
                 }
 
         result = journal_storage.write_journal(content, dt, linked_entries)
+
+        # After writing, review diary against pending reminders
+        try:
+            from diary_reminder_bridge import review_diary_against_reminders
+            pending = reminder_storage.list_reminders(status="pending")
+            if pending:
+                bridge_result = review_diary_against_reminders(content, pending)
+
+                # Auto-complete confirmed reminders
+                auto_completed = []
+                for item in bridge_result.get("auto_complete", []):
+                    rid = item.get("reminder_id")
+                    reason = item.get("reason", "Confirmed by diary entry")
+                    if rid and reminder_storage.add_completion_note(rid, reason, auto_completed=True):
+                        auto_completed.append(item)
+
+                if auto_completed:
+                    result["auto_completed_reminders"] = auto_completed
+                relevant = bridge_result.get("relevant_mentions", [])
+                if relevant:
+                    result["relevant_reminders"] = relevant
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Bridge review failed: {e}")
+
         return result
 
     except Exception as e:
@@ -662,6 +705,32 @@ def list_reminders(status: Optional[str] = None) -> Dict:
         }
 
 
+def complete_reminder_tool(reminder_id: str, note: Optional[str] = None) -> Dict:
+    """Mark a reminder as completed."""
+    try:
+        if note:
+            success = reminder_storage.add_completion_note(reminder_id, note)
+        else:
+            success = reminder_storage.complete_reminder(reminder_id)
+
+        if success:
+            return {
+                "success": True,
+                "reminder_id": reminder_id,
+                "note": note
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Reminder not found"
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
 def link_entries(journal_date: str, entry_id: str, link_type: str) -> Dict:
     """Link a journal entry to a knowledge entry."""
     try:
@@ -785,6 +854,11 @@ def execute_tool(tool_name: str, tool_input: Dict) -> Dict:
         # Handle optional status parameter
         status = tool_input.get("status")
         return list_reminders(status)
+    elif tool_name == "complete_reminder":
+        return complete_reminder_tool(
+            reminder_id=tool_input["reminder_id"],
+            note=tool_input.get("note")
+        )
     # Cross-reference tools
     elif tool_name == "link_entries":
         return link_entries(**tool_input)
