@@ -88,6 +88,11 @@ DIARY-REMINDER INTEGRATION:
 - When write_journal returns "relevant_reminders", briefly mention the connection (e.g., "This relates to your upcoming reminder about...")
 - Keep these mentions natural and brief, not mechanical.
 
+FORMATTING:
+- Use Telegram HTML for formatting: <b>bold</b>, <i>italic</i>, <code>code</code>
+- Do NOT use markdown (no **, __, `, ```, #, etc.)
+- Escape &, <, > in user content when echoing it back
+
 Be concise and natural. Confirm actions. Voice messages are often diary-like."""
 
 
@@ -222,8 +227,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Process with agent
         response = await process_message_with_agent(chat_id, text, message_id)
 
-        # Send response
-        await message.reply_text(response)
+        # Send response with HTML formatting
+        try:
+            await message.reply_text(response, parse_mode="HTML")
+        except Exception:
+            # Fallback to plain text if HTML parsing fails
+            await message.reply_text(response)
 
         logger.info(f"Responded: {response[:100]}")
 
@@ -265,7 +274,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         response = await process_message_with_agent(chat_id, transcribed_text, message_id)
 
         # Send final response
-        await message.reply_text(f"🎤 {response}")
+        try:
+            await message.reply_text(f"🎤 {response}", parse_mode="HTML")
+        except Exception:
+            await message.reply_text(f"🎤 {response}")
 
         logger.info(f"Voice processed and responded")
 
