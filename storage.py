@@ -72,6 +72,15 @@ def create_entry(
     entries.append(entry)
     _save_json(path, entries)
 
+    # Generate embedding for semantic search
+    try:
+        from embeddings import store_embedding
+        store_embedding(entry["id"], raw_message, category)
+    except Exception as e:
+        # Don't fail entry creation if embedding fails
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to generate embedding: {e}")
+
     return entry
 
 
