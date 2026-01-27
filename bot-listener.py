@@ -492,6 +492,51 @@ async def handle_inbox(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(f"Error: {e}")
 
 
+async def handle_rebuild_embeddings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /rebuild_embeddings command - regenerate all embeddings."""
+    if not update.message:
+        return
+
+    try:
+        from embeddings import rebuild_embeddings, get_embedding_stats
+        import storage
+
+        # Get current stats
+        stats = get_embedding_stats()
+
+        await update.message.reply_text(
+            f"🔄 <b>Reconstruyendo embeddings...</b>\n\n"
+            f"Embeddings actuales: {stats['total']}\n"
+            f"⏳ Esto puede tomar unos minutos...",
+            parse_mode="HTML"
+        )
+
+        # Rebuild
+        successful, failed = rebuild_embeddings(storage)
+
+        # Get new stats
+        new_stats = get_embedding_stats()
+
+        await update.message.reply_text(
+            f"✅ <b>Embeddings reconstruidos</b>\n\n"
+            f"• Exitosos: {successful}\n"
+            f"• Fallidos: {failed}\n"
+            f"• Total: {new_stats['total']}\n\n"
+            f"<b>Por categoría:</b>\n" +
+            "\n".join(f"• {cat}: {count}" for cat, count in new_stats['by_category'].items()),
+            parse_mode="HTML"
+        )
+
+        logger.info(f"Embeddings rebuilt: {successful} successful, {failed} failed")
+
+    except Exception as e:
+        logger.error(f"Error in /rebuild_embeddings: {e}", exc_info=True)
+        await update.message.reply_text(
+            f"❌ <b>Error reconstruyendo embeddings</b>\n\n{str(e)}",
+            parse_mode="HTML"
+        )
+
+
 async def handle_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /export command - create and send backup ZIP."""
     if not update.message:
@@ -594,6 +639,7 @@ def main():
     app.add_handler(CommandHandler("reminders", handle_reminders))
     app.add_handler(CommandHandler("inbox", handle_inbox))
     app.add_handler(CommandHandler("export", handle_export))
+    app.add_handler(CommandHandler("rebuild_embeddings", handle_rebuild_embeddings))
 
     # Message handlers
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))

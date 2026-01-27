@@ -331,32 +331,63 @@ def list_entries(category: str, limit: Optional[int] = None) -> Dict:
 
 
 def search_entries(query: str, categories: Optional[List[str]] = None, limit: int = 10) -> Dict:
-    """Search for entries matching query."""
+    """Search for entries matching query using semantic search + keyword fallback."""
     if categories is None:
         categories = CATEGORIES + ["inbox"]
 
-    query_lower = query.lower()
-    matches = []
-
     try:
+        # Try semantic search first
+        from embeddings import semantic_search, get_embedding_stats
+
+        stats = get_embedding_stats()
+        use_semantic = stats.get("total", 0) > 0
+
+        semantic_results = []
+        if use_semantic:
+            # Get semantic matches with similarity scores
+            semantic_matches = semantic_search(query, categories, limit * 2)
+
+            # Fetch full entries for semantic matches
+            for entry_id, similarity in semantic_matches:
+                result = get_entry_by_id(entry_id)
+                if result:
+                    entry, category = result
+                    entry_with_meta = entry.copy()
+                    entry_with_meta["_category"] = category
+                    entry_with_meta["_similarity"] = similarity
+                    entry_with_meta["_search_method"] = "semantic"
+                    semantic_results.append(entry_with_meta)
+
+        # Also do keyword search for completeness
+        query_lower = query.lower()
+        keyword_matches = []
+
         for category in categories:
             entries = get_all_entries(category)
             for entry in entries:
                 msg = entry.get("raw_message", "").lower()
                 if query_lower in msg:
-                    entry_with_cat = entry.copy()
-                    entry_with_cat["_category"] = category
-                    matches.append(entry_with_cat)
+                    # Skip if already in semantic results
+                    entry_id = entry.get("id")
+                    if not any(r.get("id") == entry_id for r in semantic_results):
+                        entry_with_cat = entry.copy()
+                        entry_with_cat["_category"] = category
+                        entry_with_cat["_search_method"] = "keyword"
+                        keyword_matches.append(entry_with_cat)
 
-        # Sort by timestamp (most recent first)
-        matches.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        # Combine results: semantic first (sorted by similarity), then keyword (by date)
+        keyword_matches.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        all_matches = semantic_results + keyword_matches
 
         return {
             "success": True,
             "query": query,
-            "count": len(matches),
-            "entries": matches[:limit]
+            "count": len(all_matches),
+            "entries": all_matches[:limit],
+            "search_method": "semantic+keyword" if use_semantic else "keyword",
+            "embedding_stats": stats if use_semantic else None
         }
+
     except Exception as e:
         return {
             "success": False,
