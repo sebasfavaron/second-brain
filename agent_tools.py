@@ -3,6 +3,9 @@ Tool definitions and implementations for the agentic bot.
 
 These tools give Claude direct access to the knowledge base.
 """
+import os
+import shutil
+import subprocess
 from typing import List, Dict, Optional
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -15,9 +18,17 @@ from storage import (
     log_audit,
     add_journal_ref_to_entry,
 )
-from config import CATEGORIES, CONFIDENCE_THRESHOLD, JOURNAL_AUDIO_DIR, DEFAULT_REMINDER_HOUR
+from config import (
+    BASE_DIR,
+    CATEGORIES,
+    CONFIDENCE_THRESHOLD,
+    JOURNAL_AUDIO_DIR,
+    DEFAULT_REMINDER_HOUR,
+    LOG_FILE,
+)
 import journal_storage
 import reminder_storage
+import skills_manager
 
 
 # Tool definitions for Claude API
@@ -321,8 +332,225 @@ TOOL_DEFINITIONS = [
             },
             "required": ["date", "index"]
         }
+    },
+    {
+        "name": "list_files",
+        "description": "List files in the repository.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Repository-relative path to list (default: .)"
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "description": "Max depth to traverse (default: 3)"
+                },
+                "include_hidden": {
+                    "type": "boolean",
+                    "description": "Include hidden files (default: false)"
+                },
+                "max_entries": {
+                    "type": "integer",
+                    "description": "Max number of entries to return (default: 200)"
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "read_file",
+        "description": "Read a text file from the repository.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Repository-relative path to read"
+                },
+                "max_bytes": {
+                    "type": "integer",
+                    "description": "Max bytes to read (default: 200000)"
+                }
+            },
+            "required": ["path"]
+        }
+    },
+    {
+        "name": "write_file",
+        "description": "Write a text file to the repository (overwrites).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Repository-relative path to write"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "File content"
+                },
+                "create_dirs": {
+                    "type": "boolean",
+                    "description": "Create parent directories if missing (default: true)"
+                }
+            },
+            "required": ["path", "content"]
+        }
+    },
+    {
+        "name": "search_repo",
+        "description": "Search the repository for a text pattern.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query (literal string)"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Repository-relative path to search (default: .)"
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Max results to return (default: 20)"
+                }
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "git_status",
+        "description": "Get git status for the repository.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "name": "git_diff",
+        "description": "Get git diff for the repository.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "staged": {
+                    "type": "boolean",
+                    "description": "Show staged diff (default: false)"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Optional path to limit diff"
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "publish_changes",
+        "description": "Stage all changes, commit, and push to the git remote.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "Commit message (default: 'Update via Telegram admin')"
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "restart_service",
+        "description": "Restart the Telegram bot service.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "service_name": {
+                    "type": "string",
+                    "description": "Systemd service name (default: second-brain-bot.service)"
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "tail_log",
+        "description": "Return the last N lines of the bot log.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "lines": {
+                    "type": "integer",
+                    "description": "Number of lines (default: 50)"
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "list_skills",
+        "description": "List installed skills.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "name": "install_skill",
+        "description": "Install a skill from a git repository.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Skill name"},
+                "repo_url": {"type": "string", "description": "Git repository URL"}
+            },
+            "required": ["name", "repo_url"]
+        }
+    },
+    {
+        "name": "enable_skill",
+        "description": "Enable a skill.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Skill name"}},
+            "required": ["name"]
+        }
+    },
+    {
+        "name": "disable_skill",
+        "description": "Disable a skill.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Skill name"}},
+            "required": ["name"]
+        }
+    },
+    {
+        "name": "remove_skill",
+        "description": "Remove a skill from the repository.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Skill name"}},
+            "required": ["name"]
+        }
     }
 ]
+
+
+def _resolve_repo_path(path_str: str) -> Path:
+    base = BASE_DIR.resolve()
+    path = Path(path_str)
+    if not path.is_absolute():
+        path = (base / path).resolve()
+    else:
+        path = path.resolve()
+    if not str(path).startswith(str(base)):
+        raise ValueError("Path outside repository")
+    return path
 
 
 # Tool implementations
@@ -822,6 +1050,281 @@ def get_audio_file(date_str: str, index: int) -> Dict:
         }
 
 
+def list_files(path: str = ".", max_depth: int = 3, include_hidden: bool = False, max_entries: int = 200) -> Dict:
+    """List files in the repository."""
+    try:
+        root = _resolve_repo_path(path)
+        if not root.exists():
+            return {"success": False, "error": "Path not found"}
+
+        results: List[str] = []
+        base_parts = len(root.parts)
+
+        for dirpath, dirnames, filenames in os.walk(root):
+            current_depth = len(Path(dirpath).parts) - base_parts
+            if current_depth >= max_depth:
+                dirnames[:] = []
+
+            if not include_hidden:
+                dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+                filenames = [f for f in filenames if not f.startswith(".")]
+
+            for filename in filenames:
+                rel = Path(dirpath) / filename
+                try:
+                    rel_path = rel.resolve().relative_to(BASE_DIR.resolve())
+                except Exception:
+                    rel_path = rel
+                results.append(str(rel_path))
+                if len(results) >= max_entries:
+                    return {
+                        "success": True,
+                        "path": str(root),
+                        "count": len(results),
+                        "truncated": True,
+                        "files": results,
+                    }
+
+        return {
+            "success": True,
+            "path": str(root),
+            "count": len(results),
+            "files": results,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def read_file(path: str, max_bytes: int = 200000) -> Dict:
+    """Read a text file from the repository."""
+    try:
+        file_path = _resolve_repo_path(path)
+        if not file_path.exists() or not file_path.is_file():
+            return {"success": False, "error": "File not found"}
+
+        content = file_path.read_text(encoding="utf-8")
+        if len(content.encode("utf-8")) > max_bytes:
+            truncated = content.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
+            return {"success": True, "path": str(file_path), "truncated": True, "content": truncated}
+
+        return {"success": True, "path": str(file_path), "content": content}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def write_file(path: str, content: str, create_dirs: bool = True) -> Dict:
+    """Write a text file to the repository."""
+    try:
+        file_path = _resolve_repo_path(path)
+        if create_dirs:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content, encoding="utf-8")
+        return {"success": True, "path": str(file_path), "bytes": len(content.encode("utf-8"))}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def search_repo(query: str, path: str = ".", max_results: int = 20) -> Dict:
+    """Search the repository for a query."""
+    try:
+        root = _resolve_repo_path(path)
+        if not root.exists():
+            return {"success": False, "error": "Path not found"}
+
+        rg = shutil.which("rg")
+        matches: List[Dict] = []
+
+        if rg:
+            result = subprocess.run(
+                [rg, "-n", "--max-count", str(max_results), query, str(root)],
+                cwd=str(BASE_DIR),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode not in (0, 1):
+                return {"success": False, "error": result.stderr.strip() or "rg failed"}
+
+            for line in result.stdout.splitlines():
+                parts = line.split(":", 2)
+                if len(parts) < 3:
+                    continue
+                file_path, line_no, text = parts
+                try:
+                    rel_path = Path(file_path).resolve().relative_to(BASE_DIR.resolve())
+                except Exception:
+                    rel_path = Path(file_path)
+                matches.append({"file": str(rel_path), "line": int(line_no), "text": text})
+                if len(matches) >= max_results:
+                    break
+        else:
+            for file_path in root.rglob("*"):
+                if len(matches) >= max_results:
+                    break
+                if not file_path.is_file():
+                    continue
+                try:
+                    content = file_path.read_text(encoding="utf-8")
+                except Exception:
+                    continue
+                for i, line in enumerate(content.splitlines(), start=1):
+                    if query in line:
+                        try:
+                            rel_path = file_path.resolve().relative_to(BASE_DIR.resolve())
+                        except Exception:
+                            rel_path = file_path
+                        matches.append({"file": str(rel_path), "line": i, "text": line})
+                        if len(matches) >= max_results:
+                            break
+
+        return {"success": True, "query": query, "count": len(matches), "matches": matches}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def git_status() -> Dict:
+    """Return git status output."""
+    try:
+        result = subprocess.run(
+            ["git", "status", "-sb"],
+            cwd=str(BASE_DIR),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return {"success": result.returncode == 0, "output": result.stdout.strip(), "error": result.stderr.strip()}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def git_diff(staged: bool = False, path: Optional[str] = None) -> Dict:
+    """Return git diff output."""
+    try:
+        cmd = ["git", "diff"]
+        if staged:
+            cmd.append("--staged")
+        if path:
+            cmd.extend(["--", path])
+        result = subprocess.run(
+            cmd,
+            cwd=str(BASE_DIR),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return {"success": result.returncode == 0, "output": result.stdout, "error": result.stderr.strip()}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def publish_changes(message: Optional[str] = None) -> Dict:
+    """Stage, commit, and push changes."""
+    try:
+        subprocess.run(["git", "add", "-A"], cwd=str(BASE_DIR), check=False)
+
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(BASE_DIR),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if not status.stdout.strip():
+            return {"success": True, "status": "clean", "message": "No changes to commit"}
+
+        commit_message = message or "Update via Telegram admin"
+        commit = subprocess.run(
+            ["git", "commit", "-m", commit_message],
+            cwd=str(BASE_DIR),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if commit.returncode != 0:
+            return {"success": False, "error": commit.stderr.strip() or commit.stdout.strip()}
+
+        push = subprocess.run(
+            ["git", "push"],
+            cwd=str(BASE_DIR),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if push.returncode != 0:
+            return {"success": False, "error": push.stderr.strip() or push.stdout.strip()}
+
+        return {"success": True, "commit": commit.stdout.strip(), "push": push.stdout.strip()}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def restart_service(service_name: str = "second-brain-bot.service") -> Dict:
+    """Restart systemd service."""
+    try:
+        cmds = [
+            ["systemctl", "restart", service_name],
+            ["sudo", "-n", "systemctl", "restart", service_name],
+        ]
+        last_error = ""
+        for cmd in cmds:
+            result = subprocess.run(
+                cmd,
+                cwd=str(BASE_DIR),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                return {"success": True, "service": service_name, "used": " ".join(cmd)}
+            last_error = result.stderr.strip() or result.stdout.strip()
+
+        return {"success": False, "error": last_error or "Failed to restart service"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def tail_log(lines: int = 50) -> Dict:
+    """Tail the bot log file."""
+    try:
+        if not LOG_FILE.exists():
+            return {"success": False, "error": "Log file not found"}
+        content = LOG_FILE.read_text(encoding="utf-8", errors="ignore")
+        all_lines = content.splitlines()
+        tail_lines = all_lines[-lines:] if lines > 0 else all_lines
+        return {"success": True, "lines": len(tail_lines), "content": "\n".join(tail_lines)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def list_skills_tool() -> Dict:
+    """List installed skills."""
+    try:
+        skills = skills_manager.list_skills()
+        return {"success": True, "count": len(skills), "skills": skills}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def install_skill(name: str, repo_url: str) -> Dict:
+    """Install a skill from git repo."""
+    return skills_manager.install_skill_from_git(name, repo_url)
+
+
+def enable_skill(name: str) -> Dict:
+    """Enable a skill."""
+    return skills_manager.enable_skill(name)
+
+
+def disable_skill(name: str) -> Dict:
+    """Disable a skill."""
+    return skills_manager.disable_skill(name)
+
+
+def remove_skill(name: str) -> Dict:
+    """Remove a skill."""
+    return skills_manager.remove_skill(name)
+
+
 # Tool execution dispatcher
 def execute_tool(tool_name: str, tool_input: Dict) -> Dict:
     """Execute a tool by name with given input."""
@@ -864,6 +1367,35 @@ def execute_tool(tool_name: str, tool_input: Dict) -> Dict:
         return link_entries(**tool_input)
     elif tool_name == "get_audio_file":
         return get_audio_file(**tool_input)
+    # Repo/admin tools
+    elif tool_name == "list_files":
+        return list_files(**tool_input)
+    elif tool_name == "read_file":
+        return read_file(**tool_input)
+    elif tool_name == "write_file":
+        return write_file(**tool_input)
+    elif tool_name == "search_repo":
+        return search_repo(**tool_input)
+    elif tool_name == "git_status":
+        return git_status()
+    elif tool_name == "git_diff":
+        return git_diff(**tool_input)
+    elif tool_name == "publish_changes":
+        return publish_changes(**tool_input)
+    elif tool_name == "restart_service":
+        return restart_service(**tool_input)
+    elif tool_name == "tail_log":
+        return tail_log(**tool_input)
+    elif tool_name == "list_skills":
+        return list_skills_tool()
+    elif tool_name == "install_skill":
+        return install_skill(**tool_input)
+    elif tool_name == "enable_skill":
+        return enable_skill(**tool_input)
+    elif tool_name == "disable_skill":
+        return disable_skill(**tool_input)
+    elif tool_name == "remove_skill":
+        return remove_skill(**tool_input)
     else:
         return {
             "success": False,
