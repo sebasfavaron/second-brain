@@ -40,7 +40,7 @@ def migrate_journal_entries():
     count = 0
     index = {}
 
-    # Walk through old structure: YYYY/MM/DD.md
+    # Walk through old structure: YYYY/MM/YYYY-MM-DD.md
     for year_dir in sorted(OLD_JOURNAL_ENTRIES.iterdir()):
         if not year_dir.is_dir():
             continue
@@ -50,18 +50,28 @@ def migrate_journal_entries():
                 continue
 
             for day_file in sorted(month_dir.glob("*.md")):
-                # Parse date from path
+                # Parse date from filename (YYYY-MM-DD.md)
                 try:
-                    year = year_dir.name
-                    month = month_dir.name
-                    day = day_file.stem
+                    filename = day_file.stem  # e.g., "2026-01-24"
+                    parts = filename.split('-')
+
+                    if len(parts) != 3:
+                        logger.warning(f"Skipping invalid filename: {day_file.name}")
+                        continue
+
+                    year, month, day = parts
+
+                    # Verify it matches directory structure
+                    if year != year_dir.name or month != month_dir.name:
+                        logger.warning(f"Date mismatch in {day_file}: {filename} vs {year_dir.name}/{month_dir.name}")
+                        continue
 
                     # Create target directory
                     target_dir = JOURNAL_ENTRIES_DIR / year / month
                     target_dir.mkdir(parents=True, exist_ok=True)
 
-                    # Copy file
-                    target_file = target_dir / day_file.name
+                    # Copy file with new name: DD.md
+                    target_file = target_dir / f"{day}.md"
                     shutil.copy2(day_file, target_file)
 
                     # Add to index
@@ -73,7 +83,7 @@ def migrate_journal_entries():
                     }
 
                     count += 1
-                    logger.info(f"Migrated: {date_key}")
+                    logger.info(f"Migrated: {date_key} -> {target_file}")
 
                 except Exception as e:
                     logger.error(f"Failed to migrate {day_file}: {e}")
@@ -88,14 +98,15 @@ def migrate_journal_entries():
 
 def migrate_audio_files():
     """Migrate audio files from old structure to new."""
-    if not OLD_JOURNAL_AUDIO.exists():
-        logger.warning(f"Old audio directory not found: {OLD_JOURNAL_AUDIO}")
+    # Audio files are in: OLD_JOURNAL_ENTRIES/YYYY/MM/YYYY-MM-DD/*.ogg
+    if not OLD_JOURNAL_ENTRIES.exists():
+        logger.warning(f"Old journal directory not found: {OLD_JOURNAL_ENTRIES}")
         return 0
 
     count = 0
 
-    # Walk through old structure: YYYY/MM/*.ogg
-    for year_dir in sorted(OLD_JOURNAL_AUDIO.iterdir()):
+    # Walk through old structure: YYYY/MM/YYYY-MM-DD/*.ogg
+    for year_dir in sorted(OLD_JOURNAL_ENTRIES.iterdir()):
         if not year_dir.is_dir():
             continue
 
@@ -103,19 +114,39 @@ def migrate_audio_files():
             if not month_dir.is_dir():
                 continue
 
-            # Create target directory
-            target_dir = JOURNAL_AUDIO_DIR / year_dir.name / month_dir.name
-            target_dir.mkdir(parents=True, exist_ok=True)
+            # Look for date subdirectories with audio files
+            for date_dir in sorted(month_dir.iterdir()):
+                if not date_dir.is_dir():
+                    continue
 
-            # Copy all audio files
-            for audio_file in sorted(month_dir.glob("*.ogg")):
+                # Parse date from directory name (YYYY-MM-DD)
                 try:
-                    target_file = target_dir / audio_file.name
-                    shutil.copy2(audio_file, target_file)
-                    count += 1
-                    logger.info(f"Migrated audio: {audio_file.name}")
+                    date_parts = date_dir.name.split('-')
+                    if len(date_parts) != 3:
+                        continue
+
+                    year, month, day = date_parts
+
+                    # Create target directory
+                    target_dir = JOURNAL_AUDIO_DIR / year / month
+                    target_dir.mkdir(parents=True, exist_ok=True)
+
+                    # Copy all audio files with new naming: DD_HHMM.ogg
+                    for audio_file in sorted(date_dir.glob("*.ogg")):
+                        try:
+                            # entry-HHMM.ogg -> DD_HHMM.ogg
+                            time_part = audio_file.stem.replace('entry-', '')
+                            new_name = f"{day}_{time_part}.ogg"
+                            target_file = target_dir / new_name
+
+                            shutil.copy2(audio_file, target_file)
+                            count += 1
+                            logger.info(f"Migrated audio: {audio_file.name} -> {new_name}")
+                        except Exception as e:
+                            logger.error(f"Failed to migrate audio {audio_file}: {e}")
+
                 except Exception as e:
-                    logger.error(f"Failed to migrate audio {audio_file}: {e}")
+                    logger.error(f"Failed to process audio dir {date_dir}: {e}")
 
     return count
 
