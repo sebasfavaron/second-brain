@@ -101,7 +101,7 @@ def collect_digest_data() -> dict:
 
 def generate_simple_digest(data: dict) -> str:
     """Fallback simple digest format."""
-    lines = ["*Daily Digest*", ""]
+    lines = ["<b>Daily Digest</b>", ""]
 
     total_new = 0
     for category, entries in data["categories"].items():
@@ -109,17 +109,17 @@ def generate_simple_digest(data: dict) -> str:
         total_new += count
 
         if count > 0:
-            lines.append(f"*{category.title()}*: {count} new")
+            lines.append(f"<b>{category.title()}</b>: {count} new")
             for entry in entries[:3]:
-                msg = escape_md_v2(entry['message'])
+                msg = entry['message'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                 lines.append(f"  {msg}")
             lines.append("")
 
     if total_new == 0:
-        lines.append("No new entries since last digest\\.")
+        lines.append("No new entries since last digest.")
 
     if data["inbox_count"] > 0:
-        lines.append(f"*Inbox*: {data['inbox_count']} items need review")
+        lines.append(f"<b>Inbox</b>: {data['inbox_count']} items need review")
 
     return "\n".join(lines)
 
@@ -127,7 +127,7 @@ def generate_simple_digest(data: dict) -> str:
 def generate_ai_digest(data: dict) -> str:
     """Generate AI-enhanced digest from structured data."""
     if not any(data["categories"].values()):
-        return "*Daily Digest*\n\nNo new entries since last digest\\."
+        return "<b>Daily Digest</b>\n\nNo new entries since last digest."
 
     # Build prompt with context
     prompt_parts = ["You are a productivity assistant analyzing daily digest data."]
@@ -167,13 +167,14 @@ RULES:
 7. Suggest next actions when relevant
 8. Keep tone helpful and actionable
 
-FORMATTING (Telegram MarkdownV2):
+FORMATTING (Telegram HTML):
 - Start with "Daily Digest" as first line
-- Use *bold* for section headers
-- Use plain text for all message content (no special formatting)
+- Use <b>bold</b> for section headers
+- Use plain text for all message content (no additional formatting)
 - Keep it clean and scannable
-- Do NOT use markdown lists, headings (#), or other unsupported syntax
-- Each section separated by blank line"""
+- Do NOT use unsupported HTML tags - only <b>, <i>, <code> are safe
+- Each section separated by blank line
+- Special chars (&, <, >) in user content will be escaped automatically"""
 
     try:
         from anthropic import Anthropic
@@ -191,19 +192,9 @@ FORMATTING (Telegram MarkdownV2):
 
         ai_text = response.content[0].text.strip()
 
-        # Escape the AI output for MarkdownV2
-        # First, extract any bold markers the AI might have used
-        # Then escape everything else
-        lines = []
-        for line in ai_text.split('\n'):
-            if line.strip().startswith('*') and line.strip().endswith('*') and line.count('*') == 2:
-                # This is a bold section header - keep it
-                lines.append(line)
-            else:
-                # Escape regular content
-                lines.append(escape_md_v2(line))
-
-        return "\n".join(lines)
+        # AI should already return HTML formatted text
+        # Just return it as-is
+        return ai_text
 
     except Exception as e:
         logger.error(f"AI digest failed: {e}")
@@ -219,11 +210,11 @@ async def send_digest(bot: Bot, chat_id: int) -> None:
     # Generate AI-enhanced digest
     digest = generate_ai_digest(data)
 
-    # Send with MarkdownV2 formatting
+    # Send with HTML formatting
     await bot.send_message(
         chat_id=chat_id,
         text=digest,
-        parse_mode="MarkdownV2"
+        parse_mode="HTML"
     )
     set_state("last_digest_time", datetime.now().isoformat())
     logger.info(f"Sent digest to {chat_id}")
@@ -329,20 +320,22 @@ async def process_reminders(bot: Bot, chat_id: int) -> int:
         content = reminder.get("content", "")
         reminder_id = reminder.get("id", "")
 
-        # Build notification message
-        message = f"🔔 *Recordatorio*\n\n{escape_md_v2(content)}"
+        # Build notification message - use HTML
+        content_html = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        message = f"🔔 <b>Recordatorio</b>\n\n{content_html}"
 
         # Add linked entry info if available
         ref_id = reminder.get("reference_entry_id")
         if ref_id:
-            message += f"\n\n_ID: {escape_md_v2(ref_id)}_"
+            ref_id_html = ref_id.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            message += f"\n\n<i>ID: {ref_id_html}</i>"
 
         # Send notification
         try:
             await bot.send_message(
                 chat_id=chat_id,
                 text=message,
-                parse_mode="MarkdownV2"
+                parse_mode="HTML"
             )
             logger.info(f"Sent reminder notification: {content[:50]}")
         except Exception as e:
