@@ -2,6 +2,8 @@
 
 An intelligent Telegram bot that combines personal knowledge management with daily journaling. Built with Claude AI (Anthropic API) for natural, conversational interaction.
 
+📚 **[Quick Start Guide →](GETTING_STARTED.md)** | 🚀 **[Roadmap →](NEXT_STEPS.md)**
+
 ## What It Does
 
 **Single bot for two systems:**
@@ -56,95 +58,37 @@ Hybrid messages automatically link diary and knowledge:
 
 ## Setup
 
-### Prerequisites
-- Python 3.11+
-- Telegram Bot Token ([get one from @BotFather](https://t.me/botfather))
-- Anthropic API Key ([get one here](https://console.anthropic.com))
-- FFmpeg (for voice transcription)
+> 📖 **Complete setup guide:** See **[GETTING_STARTED.md](GETTING_STARTED.md)** for detailed step-by-step instructions, including:
+> - Getting API keys (Telegram + Anthropic)
+> - Local setup for testing
+> - Production deployment to Raspberry Pi
+> - Troubleshooting common issues
 
-### Installation
+### Quick Start
 
-1. **Clone the repository**
+1. **Clone and install**
 ```bash
 git clone https://github.com/sebasfavaron/second-brain.git
 cd second-brain
-```
-
-2. **Create virtual environment**
-```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. **Install dependencies**
-```bash
+source venv/bin/activate
 pip install -r requirements.txt
-pip install openai-whisper  # For voice transcription
+pip install openai-whisper
 ```
 
-4. **Configure environment**
+2. **Configure**
 ```bash
 cp .env.example .env
-# Edit .env and add your tokens:
-# TELEGRAM_TOKEN=your_telegram_bot_token
-# ANTHROPIC_API_KEY=your_anthropic_api_key
+# Add your TELEGRAM_TOKEN and ANTHROPIC_API_KEY
 ```
 
-5. **Initialize directories**
+3. **Run**
 ```bash
 mkdir -p brain journal/entries journal/audio
-```
-
-6. **Run the bot**
-```bash
 python bot-listener.py
 ```
 
-### Production Setup (Raspberry Pi / Linux)
-
-**Create systemd service:**
-```bash
-sudo nano /etc/systemd/system/second-brain-bot.service
-```
-
-```ini
-[Unit]
-Description=Second Brain Telegram Bot
-After=network.target
-
-[Service]
-Type=simple
-User=your_user
-WorkingDirectory=/path/to/second-brain
-ExecStart=/path/to/second-brain/venv/bin/python bot-listener.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-**Enable and start:**
-```bash
-sudo systemctl enable second-brain-bot.service
-sudo systemctl start second-brain-bot.service
-```
-
-**Setup cron jobs for digests and reminders:**
-```bash
-crontab -e
-```
-
-```bash
-# Daily digest at 9 AM
-0 9 * * * cd /path/to/second-brain && /path/to/venv/bin/python brain-processor.py YOUR_CHAT_ID --digest >> cron.log 2>&1
-
-# Process reminders every minute
-* * * * * cd /path/to/second-brain && /path/to/venv/bin/python brain-processor.py YOUR_CHAT_ID --reminders >> cron.log 2>&1
-
-# Process corrections every 30 minutes
-*/30 * * * * cd /path/to/second-brain && /path/to/venv/bin/python brain-processor.py YOUR_CHAT_ID --corrections >> cron.log 2>&1
-```
+For production deployment with systemd and cron, see **[GETTING_STARTED.md](GETTING_STARTED.md)**.
 
 ## Architecture
 
@@ -319,6 +263,17 @@ python -c "import whisper; print('OK')"
 - Delete and restart the Telegram chat with the bot
 - Commands are set on bot startup - check logs for "Bot commands configured"
 
+## Roadmap & Future Enhancements
+
+See **[NEXT_STEPS.md](NEXT_STEPS.md)** for planned improvements including:
+- 📦 Backup & Export functionality
+- 🔍 Semantic search with embeddings
+- 📊 Analytics & insights
+- 🔗 Relationship mapping
+- 🏷️ Hashtag support
+- 📝 Templates for common entries
+- And more...
+
 ## Contributing
 
 Contributions welcome! Please:
@@ -326,6 +281,8 @@ Contributions welcome! Please:
 2. Create a feature branch
 3. Make your changes
 4. Submit a pull request
+
+Check **[NEXT_STEPS.md](NEXT_STEPS.md)** for ideas on what to work on.
 
 ## License
 
