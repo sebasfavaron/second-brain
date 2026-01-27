@@ -109,6 +109,29 @@ bot-listener.py  ---> classifier.py (Claude API)
 - `DIGEST_HOUR = 9` - daily digest time
 - Categories: people, projects, ideas, admin
 
+## Deployment
+
+Production runs on a Raspberry Pi via systemd. After committing and pushing changes, always deploy:
+
+```bash
+# Read SSH config from .deploy (gitignored)
+# SSH_HOST=sebas@ballbox-first, REMOTE_DIR=~/second-brain, SERVICE_NAME=second-brain-bot.service
+
+# 1. Push
+git push origin main
+
+# 2. Pull on remote
+ssh sebas@ballbox-first "cd ~/second-brain && git pull origin main"
+
+# 3. Restart service
+ssh sebas@ballbox-first "sudo systemctl restart second-brain-bot.service"
+
+# 4. Verify
+ssh sebas@ballbox-first "sudo systemctl status second-brain-bot.service --no-pager -l"
+```
+
+Cron jobs on the Pi run `brain-processor.py` for digests, reminders, and daily review.
+
 ## Gotchas
 
 - Token must be in `.env`, not hardcoded
