@@ -277,13 +277,16 @@ Tu asistente personal para gestión de conocimiento y diario/journal.
 <b>🗣️ Voz:</b>
 Envía mensajes de voz - se transcriben y procesan automáticamente.
 
-<b>📋 Comandos:</b>
+<b>📋 Comandos Principales:</b>
 /help - Muestra esta ayuda
 /today - Diario de hoy + recordatorios
 /day YYYY-MM-DD - Diario de fecha específica
-/search &lt;query&gt; - Busca en diario y conocimiento
+/search &lt;query&gt; - Búsqueda semántica en todo el contenido
 /reminders - Lista recordatorios pendientes
 /inbox - Items de baja confianza para revisar
+
+<b>🔧 Utilidades:</b>
+/export - Descarga backup completo (ZIP)
 /reset - Limpia historial de conversación
 
 <b>📂 Categorías de Conocimiento:</b>
@@ -292,6 +295,9 @@ Envía mensajes de voz - se transcriben y procesan automáticamente.
 • ideas - Pensamientos creativos, insights
 • admin - Logística, citas, ubicaciones
 • inbox - Clasificación pendiente
+
+<b>🔍 Búsqueda Semántica:</b>
+La búsqueda usa embeddings para encontrar contenido relacionado por significado, no solo palabras exactas. Funciona en múltiples idiomas.
 
 <b>💡 Ejemplos:</b>
 "Hoy me sentí motivado después de la charla"
