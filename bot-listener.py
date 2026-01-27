@@ -205,6 +205,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     chat_id = message.chat_id
     message_id = message.message_id
 
+    # Check if we're awaiting input for a pending command
+    pending = context.user_data.get("pending_command")
+    if pending:
+        del context.user_data["pending_command"]
+        if pending == "search":
+            context.args = text.split()
+            return await handle_search(update, context)
+        elif pending == "day":
+            context.args = text.split()
+            return await handle_day(update, context)
+
     logger.info(f"Received: chat_id={chat_id} msg_id={message_id} text={text[:50]}")
 
     try:
@@ -381,7 +392,8 @@ async def handle_day(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     try:
         # Parse date from args (format: YYYY-MM-DD)
         if not context.args:
-            await update.message.reply_text("Uso: /day YYYY-MM-DD")
+            context.user_data["pending_command"] = "day"
+            await update.message.reply_text("📅 ¿Qué fecha? (YYYY-MM-DD)")
             return
 
         date_str = context.args[0]
@@ -416,7 +428,8 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         if not context.args:
-            await update.message.reply_text("Uso: /search &lt;query&gt;", parse_mode="HTML")
+            context.user_data["pending_command"] = "search"
+            await update.message.reply_text("🔍 ¿Qué quieres buscar?")
             return
 
         query = " ".join(context.args)
