@@ -61,6 +61,7 @@ def create_entry(
         "chat_id": chat_id,
         "message_id": message_id,
         "corrected_from": None,
+        "journal_refs": [],  # Links to journal entries
     }
 
     path = STORAGE_FILES.get(category)
@@ -163,6 +164,58 @@ def get_recent_entries(category: str, limit: int = 10) -> list:
     """Get most recent entries in a category."""
     entries = get_all_entries(category)
     return sorted(entries, key=lambda x: x.get("timestamp", ""), reverse=True)[:limit]
+
+
+def add_journal_ref_to_entry(entry_id: str, journal_date: str, link_type: str = "related") -> bool:
+    """
+    Add a journal reference to an entry.
+
+    Args:
+        entry_id: UUID of the entry
+        journal_date: Date of the journal entry (YYYY-MM-DD)
+        link_type: Type of link (e.g., 'extracted_from', 'related_to')
+
+    Returns:
+        True if successful, False if entry not found
+    """
+    # Find entry across all categories
+    result = get_entry_by_id(entry_id)
+    if not result:
+        return False
+
+    entry, category = result
+    path = STORAGE_FILES.get(category)
+
+    # Load all entries
+    entries = _load_json(path)
+
+    # Find and update entry
+    for e in entries:
+        if e.get("id") == entry_id:
+            # Initialize journal_refs if not exists
+            if "journal_refs" not in e:
+                e["journal_refs"] = []
+
+            # Add new reference if not already present
+            ref = {
+                "date": journal_date,
+                "link_type": link_type,
+                "linked_at": datetime.now().isoformat()
+            }
+
+            # Check if already linked
+            already_linked = any(
+                r.get("date") == journal_date and r.get("link_type") == link_type
+                for r in e["journal_refs"]
+            )
+
+            if not already_linked:
+                e["journal_refs"].append(ref)
+                _save_json(path, entries)
+
+            return True
+
+    return False
 
 
 # --- Audit Logging ---

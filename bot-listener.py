@@ -1,11 +1,12 @@
 """
-Agentic Telegram bot for Second Brain.
+Unified Brain + Diary Telegram bot.
 
-Uses Claude with tool use API for natural conversational interaction.
-Claude has direct access to storage tools and maintains conversation history.
+Combines knowledge management and diary/journal in one agentic bot.
+Handles text, voice messages, reminders, and cross-references.
 """
 import logging
 import json
+from datetime import datetime, date, timedelta
 from telegram import Update
 from telegram.ext import Application, MessageHandler, ContextTypes, filters, CommandHandler
 
@@ -14,6 +15,9 @@ from classifier import get_client
 from storage import init_storage
 from agent_tools import TOOL_DEFINITIONS, execute_tool
 from conversation_state import get_conversation_history, add_message, clear_conversation
+from voice_handler import handle_voice_message
+import journal_storage
+import reminder_storage
 
 # Logging setup
 logging.basicConfig(
@@ -27,51 +31,56 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # System prompt for the agent
-AGENT_SYSTEM_PROMPT = """You are a personal knowledge management assistant helping a user organize their "second brain."
+AGENT_SYSTEM_PROMPT = """You are a unified personal assistant managing both knowledge and diary/journal for the user.
 
-AVAILABLE CATEGORIES:
+MESSAGE TYPES - Route appropriately:
+1. **DIARY**: Emotional, reflective, daily logs → write_journal
+2. **KNOWLEDGE**: Facts, reminders, people info, projects → create_entry
+3. **HYBRID**: Diary with extractable facts → write_journal + create_entry + link_entries
+
+KNOWLEDGE CATEGORIES:
 - people: Information about specific people (names, relationships, facts)
 - projects: Work tasks, project updates, todos, deadlines
 - ideas: Creative thoughts, future plans, insights
-- admin: Logistics, appointments, locations, reminders
+- admin: Logistics, appointments, locations
 - inbox: Low-confidence items needing review
 
-YOUR CAPABILITIES:
-You have tools to:
-1. Search and list entries in any category
-2. Create new entries when user shares information
-3. Move entries between categories (corrections)
-4. Delete entries when requested
-5. Answer questions about stored information
+YOUR TOOLS:
+Knowledge base (6):
+- list_entries, search_entries, get_entry
+- create_entry, move_entry, delete_entry
 
-BEHAVIOR GUIDELINES:
-1. **New information**: When user shares facts, create entries with appropriate category and confidence (0.7+ for clear classifications)
-2. **Questions**: When user asks what's in a category or searches for info, use list_entries or search_entries tools
-3. **Corrections**: When user says an entry is in wrong category, use move_entry
-4. **Deletions**: When user wants to delete something, search for it, confirm, then delete
-5. **Conversation**: Maintain context across messages. Remember what you showed the user
-6. **Honesty**: Only use tools to access real data. Never make up or hallucinate information
-7. **Clarification**: If ambiguous, ask user to clarify (e.g., "which entry?" if multiple matches)
+Journal/Diary (3):
+- write_journal: Store diary entries (today's journal by default)
+- read_journal: Read journal for specific date
+- search_journal: Search across all journal entries
 
-EXAMPLES:
-User: "Felipe es mi socio"
-→ create_entry(category="people", message="Felipe es mi socio", confidence=0.9)
-→ Respond: "Guardado en people (90%)"
+Reminders (2):
+- create_reminder: Set time-based reminders (default: tomorrow 9 AM)
+- list_reminders: Show pending/upcoming reminders
 
-User: "¿qué hay en inbox?"
-→ list_entries(category="inbox")
-→ Show user the actual entries found
+Cross-reference (2):
+- link_entries: Connect journal entry to knowledge entry
+- get_audio_file: Retrieve voice recording
 
-User: "no hace falta clasificar ballbox"
-→ search_entries(query="ballbox")
-→ If found, confirm and delete_entry
-→ If multiple, list and ask which one
+ROUTING EXAMPLES:
+"Today was rough" → write_journal (pure diary)
+"Felipe birthday March 15" → create_entry(people) (pure knowledge)
+"Great meeting with Juan, funding deadline March" → write_journal + create_entry(people + projects) + link_entries (hybrid)
+"Remind me to call dentist tomorrow" → create_reminder
+"What do I know about Felipe?" → search_entries + search_journal (search both)
 
-User: "the one in inbox"
-→ Remember previous search context, filter to inbox entry
-→ delete_entry with that entry
+HYBRID MESSAGE HANDLING:
+1. Write full message to journal with write_journal
+2. Extract factual info and create_entry for each fact
+3. Link them with link_entries(journal_date, entry_id, "extracted_from")
 
-Be concise and natural. Confirm actions when you perform them."""
+REMINDER HANDLING:
+- "Remind me X" → create_reminder (default: tomorrow 9 AM)
+- "Remind me X at 3pm" → create_reminder with specific time
+- "Remind me X daily/weekly/monthly" → create_reminder with repeat
+
+Be concise and natural. Confirm actions. Voice messages are often diary-like."""
 
 
 async def process_message_with_agent(chat_id: int, user_message: str, telegram_message_id: int) -> str:
@@ -200,6 +209,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await message.reply_text(f"Error: {e}")
 
 
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle incoming voice messages."""
+    if not update.message or not update.message.voice:
+        return
+
+    message = update.message
+    chat_id = message.chat_id
+    message_id = message.message_id
+    timestamp = datetime.fromtimestamp(message.date.timestamp())
+
+    logger.info(f"Received voice: chat_id={chat_id} msg_id={message_id}")
+
+    try:
+        # Send "processing" message
+        processing_msg = await message.reply_text("🎤 Transcribiendo...")
+
+        # Download and transcribe
+        result = await handle_voice_message(context.bot, message.voice, timestamp)
+
+        if not result:
+            await processing_msg.edit_text("❌ Error transcribiendo audio")
+            return
+
+        transcribed_text = result["text"]
+        logger.info(f"Transcribed: {transcribed_text[:100]}")
+
+        # Update processing message
+        await processing_msg.edit_text(f"📝 Transcripción: {transcribed_text[:100]}...")
+
+        # Process transcription with agent
+        response = await process_message_with_agent(chat_id, transcribed_text, message_id)
+
+        # Send final response
+        await message.reply_text(f"🎤 {response}")
+
+        logger.info(f"Voice processed and responded")
+
+    except Exception as e:
+        logger.error(f"Error handling voice: {e}", exc_info=True)
+        await message.reply_text(f"❌ Error: {e}")
+
+
 async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /reset command to clear conversation history."""
     if not update.message:
@@ -209,6 +260,177 @@ async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     clear_conversation(chat_id)
     await update.message.reply_text("Conversation history cleared. Starting fresh!")
     logger.info(f"Reset conversation for chat_id={chat_id}")
+
+
+async def handle_today(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /today command - show today's journal and reminders."""
+    if not update.message:
+        return
+
+    try:
+        # Read today's journal
+        journal = journal_storage.read_journal()
+
+        # Get today's reminders
+        reminders = reminder_storage.get_upcoming_reminders(days=1)
+
+        response = "📅 **Hoy**\n\n"
+
+        # Journal section
+        if journal.get("exists"):
+            content = journal.get("content", "")
+            # Show first 500 chars
+            preview = content[:500] + ("..." if len(content) > 500 else "")
+            response += f"**Diario:**\n{preview}\n\n"
+        else:
+            response += "**Diario:** Sin entradas hoy\n\n"
+
+        # Reminders section
+        if reminders:
+            response += f"**Recordatorios ({len(reminders)}):**\n"
+            for r in reminders[:5]:
+                trigger = datetime.fromisoformat(r["trigger_time"])
+                response += f"• {trigger.strftime('%H:%M')} - {r['content']}\n"
+        else:
+            response += "**Recordatorios:** Ninguno"
+
+        await update.message.reply_text(response)
+
+    except Exception as e:
+        logger.error(f"Error in /today: {e}")
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def handle_day(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /day command - show journal for specific date."""
+    if not update.message:
+        return
+
+    try:
+        # Parse date from args (format: YYYY-MM-DD)
+        if not context.args:
+            await update.message.reply_text("Uso: /day YYYY-MM-DD")
+            return
+
+        date_str = context.args[0]
+        target_date = date.fromisoformat(date_str)
+
+        # Read journal
+        journal = journal_storage.read_journal(target_date)
+
+        if not journal.get("exists"):
+            await update.message.reply_text(f"No hay entradas para {date_str}")
+            return
+
+        content = journal.get("content", "")
+        # Split into chunks if too long
+        if len(content) > 4000:
+            await update.message.reply_text(content[:4000] + "...\n\n(continúa)")
+            await update.message.reply_text(content[4000:8000])
+        else:
+            await update.message.reply_text(content)
+
+    except ValueError:
+        await update.message.reply_text("Formato inválido. Uso: /day YYYY-MM-DD")
+    except Exception as e:
+        logger.error(f"Error in /day: {e}")
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /search command - search both journal and knowledge."""
+    if not update.message:
+        return
+
+    try:
+        if not context.args:
+            await update.message.reply_text("Uso: /search <query>")
+            return
+
+        query = " ".join(context.args)
+
+        # Search journal
+        journal_matches = journal_storage.search_journal(query)
+
+        # Search knowledge (via agent to get formatted results)
+        response = f"🔍 Buscando: '{query}'\n\n"
+
+        # Journal results
+        if journal_matches:
+            response += f"**Diario ({len(journal_matches)} entradas):**\n"
+            for match in journal_matches[:3]:
+                response += f"• {match['date']}\n"
+            if len(journal_matches) > 3:
+                response += f"...y {len(journal_matches) - 3} más\n"
+            response += "\n"
+        else:
+            response += "**Diario:** Sin resultados\n\n"
+
+        # Use agent to search knowledge
+        chat_id = update.message.chat_id
+        search_request = f"Busca '{query}' en las categorías del conocimiento"
+        knowledge_response = await process_message_with_agent(chat_id, search_request, update.message.message_id)
+
+        response += f"**Conocimiento:**\n{knowledge_response}"
+
+        await update.message.reply_text(response)
+
+    except Exception as e:
+        logger.error(f"Error in /search: {e}")
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /reminders command - list upcoming reminders."""
+    if not update.message:
+        return
+
+    try:
+        reminders = reminder_storage.get_upcoming_reminders(days=30)
+
+        if not reminders:
+            await update.message.reply_text("📝 No hay recordatorios pendientes")
+            return
+
+        response = f"📝 **Recordatorios ({len(reminders)}):**\n\n"
+
+        for r in reminders[:10]:
+            trigger = datetime.fromisoformat(r["trigger_time"])
+            days_until = (trigger - datetime.now()).days
+
+            if days_until == 0:
+                when = "Hoy " + trigger.strftime('%H:%M')
+            elif days_until == 1:
+                when = "Mañana " + trigger.strftime('%H:%M')
+            else:
+                when = trigger.strftime('%Y-%m-%d %H:%M')
+
+            repeat_icon = "🔁" if r.get("repeat") != "none" else ""
+            response += f"{repeat_icon} {when}\n  {r['content']}\n\n"
+
+        if len(reminders) > 10:
+            response += f"...y {len(reminders) - 10} más"
+
+        await update.message.reply_text(response)
+
+    except Exception as e:
+        logger.error(f"Error in /reminders: {e}")
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def handle_inbox(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /inbox command - show low-confidence items."""
+    if not update.message:
+        return
+
+    try:
+        chat_id = update.message.chat_id
+        response = await process_message_with_agent(chat_id, "¿Qué hay en inbox?", update.message.message_id)
+        await update.message.reply_text(response)
+
+    except Exception as e:
+        logger.error(f"Error in /inbox: {e}")
+        await update.message.reply_text(f"Error: {e}")
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -230,12 +452,22 @@ def main():
     # Build application
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    # Handlers
+    # Command handlers
     app.add_handler(CommandHandler("reset", handle_reset))
+    app.add_handler(CommandHandler("today", handle_today))
+    app.add_handler(CommandHandler("day", handle_day))
+    app.add_handler(CommandHandler("search", handle_search))
+    app.add_handler(CommandHandler("reminders", handle_reminders))
+    app.add_handler(CommandHandler("inbox", handle_inbox))
+
+    # Message handlers
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # Error handler
     app.add_error_handler(error_handler)
 
-    logger.info("Agentic bot starting...")
+    logger.info("Unified Brain + Diary bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
