@@ -4,13 +4,17 @@ Conversation state management for the agentic bot.
 Maintains conversation history per chat_id to enable multi-turn conversations.
 """
 import json
+import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict
 from config import BRAIN_DIR
 
+logger = logging.getLogger(__name__)
+
 CONVERSATION_FILE = BRAIN_DIR / "conversations.json"
 MAX_HISTORY_PER_CHAT = 20  # Keep last 20 messages per chat
+CONVERSATION_TIMEOUT_MINUTES = 30  # Auto-reset after inactivity
 
 
 def _load_conversations() -> Dict:
@@ -45,6 +49,20 @@ def get_conversation_history(chat_id: int, limit: int = 10) -> List[Dict]:
         return []
 
     history = conversations[chat_key].get("messages", [])
+
+    # Auto-reset if last message is older than timeout
+    if history:
+        last_ts = history[-1].get("timestamp")
+        if last_ts:
+            try:
+                last_time = datetime.fromisoformat(last_ts)
+                if datetime.now() - last_time > timedelta(minutes=CONVERSATION_TIMEOUT_MINUTES):
+                    logger.info(f"Conversation timeout for chat {chat_id}, clearing history")
+                    conversations[chat_key]["messages"] = []
+                    _save_conversations(conversations)
+                    return []
+            except (ValueError, TypeError):
+                pass
 
     # Return last N messages
     recent = history[-limit:] if limit else history
