@@ -18,6 +18,7 @@ from conversation_state import get_conversation_history, add_message, clear_conv
 from voice_handler import handle_voice_message
 import journal_storage
 import reminder_storage
+import backup_manager
 
 # Logging setup
 logging.basicConfig(
@@ -491,6 +492,63 @@ async def handle_inbox(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(f"Error: {e}")
 
 
+async def handle_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /export command - create and send backup ZIP."""
+    if not update.message:
+        return
+
+    try:
+        # Get backup stats
+        stats = backup_manager.get_backup_stats()
+
+        # Send initial message
+        status_msg = await update.message.reply_text(
+            f"📦 <b>Creando backup...</b>\n\n"
+            f"• Brain: {stats['brain_files']} archivos ({stats['brain_size_mb']:.1f} MB)\n"
+            f"• Journal: {stats['journal_entries']} entradas\n"
+            f"• Audio: {stats['audio_files']} archivos\n"
+            f"• Total: {stats['total_size_mb']:.1f} MB\n\n"
+            f"⏳ Comprimiendo datos...",
+            parse_mode="HTML"
+        )
+
+        # Create backup
+        backup_path = backup_manager.create_backup()
+
+        # Update message
+        await status_msg.edit_text(
+            f"📦 <b>Backup creado</b>\n\n"
+            f"• Brain: {stats['brain_files']} archivos\n"
+            f"• Journal: {stats['journal_entries']} entradas\n"
+            f"• Audio: {stats['audio_files']} archivos\n\n"
+            f"📤 Enviando archivo...",
+            parse_mode="HTML"
+        )
+
+        # Send ZIP file
+        with open(backup_path, 'rb') as backup_file:
+            await update.message.reply_document(
+                document=backup_file,
+                filename=backup_path.name,
+                caption=f"✅ Backup completado\n{backup_path.name}"
+            )
+
+        # Delete status message
+        await status_msg.delete()
+
+        # Cleanup old backups
+        backup_manager.cleanup_old_backups()
+
+        logger.info(f"Backup sent to user: {backup_path.name}")
+
+    except Exception as e:
+        logger.error(f"Error in /export: {e}", exc_info=True)
+        await update.message.reply_text(
+            f"❌ <b>Error creando backup</b>\n\n{str(e)}",
+            parse_mode="HTML"
+        )
+
+
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors."""
     logger.error(f"Update {update} caused error {context.error}")
@@ -505,6 +563,7 @@ async def post_init(application: Application) -> None:
         BotCommand("search", "Busca en diario y conocimiento"),
         BotCommand("reminders", "Lista recordatorios pendientes"),
         BotCommand("inbox", "Items de baja confianza para revisar"),
+        BotCommand("export", "Descarga backup completo (ZIP)"),
         BotCommand("reset", "Limpia historial de conversación"),
     ]
 
@@ -534,6 +593,7 @@ def main():
     app.add_handler(CommandHandler("search", handle_search))
     app.add_handler(CommandHandler("reminders", handle_reminders))
     app.add_handler(CommandHandler("inbox", handle_inbox))
+    app.add_handler(CommandHandler("export", handle_export))
 
     # Message handlers
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
