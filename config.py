@@ -12,6 +12,7 @@ BRAIN_DIR = BASE_DIR / "brain"
 JOURNAL_DIR = BASE_DIR / "journal"
 JOURNAL_ENTRIES_DIR = JOURNAL_DIR / "entries"
 JOURNAL_AUDIO_DIR = JOURNAL_DIR / "audio"
+SKILLS_DIR = BASE_DIR / "skills"
 LOG_FILE = BASE_DIR / "bot.log"
 
 # JSON storage files

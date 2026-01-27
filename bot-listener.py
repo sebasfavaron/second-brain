@@ -19,6 +19,7 @@ from voice_handler import handle_voice_message
 import journal_storage
 import reminder_storage
 import backup_manager
+from skills_manager import load_skills_prompt
 
 # Logging setup
 logging.basicConfig(
@@ -93,7 +94,14 @@ FORMATTING:
 - Do NOT use markdown (no **, __, `, ```, #, etc.)
 - Escape &, <, > in user content when echoing it back
 
-Be concise and natural. Confirm actions. Voice messages are often diary-like."""
+Be concise and natural. Confirm actions. Voice messages are often diary-like.
+
+ADMIN / SELF-MANAGEMENT:
+- Only perform admin actions when the user explicitly asks to manage the system, install skills, edit code, fix bugs, or change configuration.
+- You have tools to read/write repo files, search, check git status/diff, publish changes (commit+push), restart the service, and manage skills.
+- After making code changes, publish changes and restart the service.
+- If a request is ambiguous, ask a brief clarification.
+"""
 
 
 async def process_message_with_agent(chat_id: int, user_message: str, telegram_message_id: int) -> str:
@@ -117,6 +125,9 @@ async def process_message_with_agent(chat_id: int, user_message: str, telegram_m
     # Build system prompt with current time so agent can calculate relative times
     now = datetime.now()
     system_prompt = f"{AGENT_SYSTEM_PROMPT}\n\nCURRENT LOCAL TIME: {now.strftime('%Y-%m-%d %H:%M:%S')} ({now.strftime('%A')})"
+    skills_prompt = load_skills_prompt()
+    if skills_prompt:
+        system_prompt += f"\n\n{skills_prompt}"
 
     # Call Claude with tools (agentic loop)
     try:
