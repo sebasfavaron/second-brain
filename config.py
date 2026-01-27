@@ -9,6 +9,9 @@ load_dotenv()
 # Paths
 BASE_DIR = Path(__file__).parent
 BRAIN_DIR = BASE_DIR / "brain"
+JOURNAL_DIR = BASE_DIR / "journal"
+JOURNAL_ENTRIES_DIR = JOURNAL_DIR / "entries"
+JOURNAL_AUDIO_DIR = JOURNAL_DIR / "audio"
 LOG_FILE = BASE_DIR / "bot.log"
 
 # JSON storage files
@@ -22,6 +25,8 @@ STORAGE_FILES = {
 AUDIT_FILE = BRAIN_DIR / "audit.json"
 STATE_FILE = BRAIN_DIR / "state.json"
 CORRECTIONS_QUEUE = BRAIN_DIR / "corrections_queue.json"
+REMINDERS_FILE = BRAIN_DIR / "reminders.json"
+JOURNAL_INDEX = JOURNAL_DIR / "index.json"
 
 # Context files for enriched classification
 CONTEXT_FILES = {
@@ -43,3 +48,9 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 # Digest settings
 DIGEST_HOUR = 9  # 9 AM daily digest
+
+# Whisper settings for voice transcription
+WHISPER_MODEL = "base"  # Options: tiny, base, small, medium, large
+
+# Default reminder time (when not specified)
+DEFAULT_REMINDER_HOUR = 9  # 9 AM next day

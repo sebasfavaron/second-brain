@@ -30,6 +30,7 @@ from storage import (
     get_state,
     set_state,
 )
+import reminder_storage
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -315,26 +316,81 @@ async def run_corrections() -> None:
         logger.info("No corrections to process")
 
 
+async def process_reminders(bot: Bot, chat_id: int) -> int:
+    """
+    Process triggered reminders and send notifications.
+
+    Returns:
+        Number of reminders triggered
+    """
+    triggered = reminder_storage.process_triggered_reminders()
+
+    for reminder in triggered:
+        content = reminder.get("content", "")
+        reminder_id = reminder.get("id", "")
+
+        # Build notification message
+        message = f"🔔 *Recordatorio*\n\n{escape_md_v2(content)}"
+
+        # Add linked entry info if available
+        ref_id = reminder.get("reference_entry_id")
+        if ref_id:
+            message += f"\n\n_ID: {escape_md_v2(ref_id)}_"
+
+        # Send notification
+        try:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=message,
+                parse_mode="MarkdownV2"
+            )
+            logger.info(f"Sent reminder notification: {content[:50]}")
+        except Exception as e:
+            logger.error(f"Failed to send reminder {reminder_id}: {e}")
+
+    return len(triggered)
+
+
+async def run_reminders(chat_id: int) -> None:
+    """Process reminders once and exit."""
+    if not TELEGRAM_TOKEN:
+        raise ValueError("TELEGRAM_TOKEN not set")
+
+    bot = Bot(token=TELEGRAM_TOKEN)
+    init_storage()
+
+    triggered = await process_reminders(bot, chat_id)
+    if triggered:
+        logger.info(f"Triggered {triggered} reminders")
+    else:
+        logger.info("No reminders to trigger")
+
+
 def main():
     """Entry point."""
     import sys
     import argparse
 
     parser = argparse.ArgumentParser(description="Brain processor for Second Brain")
-    parser.add_argument("chat_id", type=int, help="Telegram chat ID for digests")
+    parser.add_argument("chat_id", type=int, help="Telegram chat ID for notifications")
     parser.add_argument("--digest", action="store_true", help="Send daily digest")
     parser.add_argument("--corrections", action="store_true", help="Process corrections queue")
+    parser.add_argument("--reminders", action="store_true", help="Process triggered reminders")
 
     args = parser.parse_args()
 
-    # Default to both if neither specified
-    if not args.digest and not args.corrections:
+    # Default to all if none specified
+    if not args.digest and not args.corrections and not args.reminders:
         args.digest = True
         args.corrections = True
+        args.reminders = True
 
     try:
         if args.corrections:
             asyncio.run(run_corrections())
+
+        if args.reminders:
+            asyncio.run(run_reminders(args.chat_id))
 
         if args.digest:
             asyncio.run(run_digest(args.chat_id))

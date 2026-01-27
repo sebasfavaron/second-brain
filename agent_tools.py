@@ -4,6 +4,8 @@ Tool definitions and implementations for the agentic bot.
 These tools give Claude direct access to the knowledge base.
 """
 from typing import List, Dict, Optional
+from datetime import datetime, date, timedelta
+from pathlib import Path
 from storage import (
     get_all_entries,
     create_entry as storage_create_entry,
@@ -11,8 +13,11 @@ from storage import (
     delete_entry as storage_delete_entry,
     get_entry_by_id,
     log_audit,
+    add_journal_ref_to_entry,
 )
-from config import CATEGORIES, CONFIDENCE_THRESHOLD
+from config import CATEGORIES, CONFIDENCE_THRESHOLD, JOURNAL_AUDIO_DIR, DEFAULT_REMINDER_HOUR
+import journal_storage
+import reminder_storage
 
 
 # Tool definitions for Claude API
@@ -144,6 +149,159 @@ TOOL_DEFINITIONS = [
                 }
             },
             "required": ["entry_id", "category"]
+        }
+    },
+    {
+        "name": "write_journal",
+        "description": "Write a diary/journal entry. Use for emotional, reflective, or daily log content. Automatically stores in today's journal (or specified date).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The journal entry content"
+                },
+                "timestamp": {
+                    "type": "string",
+                    "description": "Optional ISO timestamp (defaults to now)",
+                    "format": "date-time"
+                },
+                "linked_entries": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of entry IDs to link to this journal entry"
+                }
+            },
+            "required": ["content"]
+        }
+    },
+    {
+        "name": "read_journal",
+        "description": "Read a journal entry for a specific date.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "description": "Date in YYYY-MM-DD format (defaults to today)",
+                    "format": "date"
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "search_journal",
+        "description": "Search journal entries for keywords or phrases. Searches across all journal entries.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query"
+                },
+                "date_from": {
+                    "type": "string",
+                    "description": "Optional start date (YYYY-MM-DD)",
+                    "format": "date"
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "Optional end date (YYYY-MM-DD)",
+                    "format": "date"
+                }
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "create_reminder",
+        "description": "Create a reminder for a future time. Use when user asks to be reminded about something. Can be recurring (daily, weekly, monthly).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "Reminder message"
+                },
+                "trigger_time": {
+                    "type": "string",
+                    "description": "ISO timestamp when to trigger (defaults to tomorrow 9 AM)",
+                    "format": "date-time"
+                },
+                "repeat": {
+                    "type": "string",
+                    "enum": ["none", "daily", "weekly", "monthly"],
+                    "description": "Repeat pattern (default: none)"
+                },
+                "reference_entry_id": {
+                    "type": "string",
+                    "description": "Optional entry ID to link this reminder to"
+                },
+                "journal_date": {
+                    "type": "string",
+                    "description": "Optional journal date to link (YYYY-MM-DD)",
+                    "format": "date"
+                }
+            },
+            "required": ["content"]
+        }
+    },
+    {
+        "name": "list_reminders",
+        "description": "List reminders, optionally filtered by status.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["pending", "triggered", "completed"],
+                    "description": "Optional status filter"
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "link_entries",
+        "description": "Create a cross-reference link between a journal entry and a knowledge entry. Use for HYBRID messages that have both diary content and extractable facts.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "journal_date": {
+                    "type": "string",
+                    "description": "Journal date (YYYY-MM-DD)",
+                    "format": "date"
+                },
+                "entry_id": {
+                    "type": "string",
+                    "description": "Knowledge entry UUID to link"
+                },
+                "link_type": {
+                    "type": "string",
+                    "description": "Type of link (e.g., 'extracted_from', 'related_to')"
+                }
+            },
+            "required": ["journal_date", "entry_id", "link_type"]
+        }
+    },
+    {
+        "name": "get_audio_file",
+        "description": "Retrieve path to a voice recording for a specific date and index.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "description": "Date of the recording (YYYY-MM-DD)",
+                    "format": "date"
+                },
+                "index": {
+                    "type": "integer",
+                    "description": "Recording index for that date (0-based)"
+                }
+            },
+            "required": ["date", "index"]
         }
     }
 ]
@@ -314,9 +472,260 @@ def delete_entry(entry_id: str, category: str) -> Dict:
         }
 
 
+def write_journal(content: str, timestamp: Optional[str] = None, linked_entries: Optional[List[str]] = None) -> Dict:
+    """Write a journal entry."""
+    try:
+        # Parse timestamp if provided
+        dt = None
+        if timestamp:
+            try:
+                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": "Invalid timestamp format"
+                }
+
+        result = journal_storage.write_journal(content, dt, linked_entries)
+        return result
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+def read_journal(date_str: Optional[str] = None) -> Dict:
+    """Read a journal entry for a date."""
+    try:
+        # Parse date if provided
+        target_date = None
+        if date_str:
+            try:
+                target_date = date.fromisoformat(date_str)
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": "Invalid date format. Use YYYY-MM-DD"
+                }
+
+        result = journal_storage.read_journal(target_date)
+        result["success"] = True
+        return result
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+def search_journal(query: str, date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict:
+    """Search journal entries."""
+    try:
+        # Parse dates if provided
+        from_date = None
+        to_date = None
+
+        if date_from:
+            try:
+                from_date = date.fromisoformat(date_from)
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": "Invalid date_from format. Use YYYY-MM-DD"
+                }
+
+        if date_to:
+            try:
+                to_date = date.fromisoformat(date_to)
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": "Invalid date_to format. Use YYYY-MM-DD"
+                }
+
+        matches = journal_storage.search_journal(query, from_date, to_date)
+
+        return {
+            "success": True,
+            "query": query,
+            "count": len(matches),
+            "matches": matches
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+def create_reminder(
+    content: str,
+    trigger_time: Optional[str] = None,
+    repeat: str = "none",
+    reference_entry_id: Optional[str] = None,
+    journal_date: Optional[str] = None
+) -> Dict:
+    """Create a reminder."""
+    try:
+        # Parse trigger_time if provided
+        dt = None
+        if trigger_time:
+            try:
+                dt = datetime.fromisoformat(trigger_time.replace('Z', '+00:00'))
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": "Invalid trigger_time format"
+                }
+
+        # Parse journal_date if provided
+        j_date = None
+        if journal_date:
+            try:
+                j_date = date.fromisoformat(journal_date)
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": "Invalid journal_date format"
+                }
+
+        reminder = reminder_storage.create_reminder(
+            content=content,
+            trigger_time=dt,
+            repeat=repeat,
+            reference_entry_id=reference_entry_id,
+            journal_date=j_date
+        )
+
+        return {
+            "success": True,
+            "reminder": reminder
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+def list_reminders(status: Optional[str] = None) -> Dict:
+    """List reminders."""
+    try:
+        reminders = reminder_storage.list_reminders(status)
+
+        return {
+            "success": True,
+            "count": len(reminders),
+            "reminders": reminders
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+def link_entries(journal_date: str, entry_id: str, link_type: str) -> Dict:
+    """Link a journal entry to a knowledge entry."""
+    try:
+        # Parse journal_date
+        try:
+            j_date = date.fromisoformat(journal_date)
+        except ValueError:
+            return {
+                "success": False,
+                "error": "Invalid journal_date format. Use YYYY-MM-DD"
+            }
+
+        # Add link to journal file
+        journal_linked = journal_storage.add_linked_entry_to_journal(j_date, entry_id)
+
+        if not journal_linked:
+            return {
+                "success": False,
+                "error": "Journal entry not found or failed to update"
+            }
+
+        # Add journal ref to knowledge entry
+        entry_linked = add_journal_ref_to_entry(entry_id, journal_date, link_type)
+
+        if not entry_linked:
+            return {
+                "success": False,
+                "error": "Knowledge entry not found or failed to update"
+            }
+
+        return {
+            "success": True,
+            "journal_date": journal_date,
+            "entry_id": entry_id,
+            "link_type": link_type
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+def get_audio_file(date_str: str, index: int) -> Dict:
+    """Get path to audio file for a date."""
+    try:
+        # Parse date
+        try:
+            target_date = date.fromisoformat(date_str)
+        except ValueError:
+            return {
+                "success": False,
+                "error": "Invalid date format. Use YYYY-MM-DD"
+            }
+
+        # Build audio file path
+        year = str(target_date.year)
+        month = f"{target_date.month:02d}"
+
+        audio_dir = JOURNAL_AUDIO_DIR / year / month
+        if not audio_dir.exists():
+            return {
+                "success": False,
+                "error": "No audio files for this date"
+            }
+
+        # List audio files for this date
+        day = f"{target_date.day:02d}"
+        audio_files = sorted(audio_dir.glob(f"{day}_*.ogg"))
+
+        if index >= len(audio_files):
+            return {
+                "success": False,
+                "error": f"Audio index {index} not found. Only {len(audio_files)} files exist."
+            }
+
+        return {
+            "success": True,
+            "date": date_str,
+            "index": index,
+            "file_path": str(audio_files[index])
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
 # Tool execution dispatcher
 def execute_tool(tool_name: str, tool_input: Dict) -> Dict:
     """Execute a tool by name with given input."""
+    # Knowledge base tools
     if tool_name == "list_entries":
         return list_entries(**tool_input)
     elif tool_name == "search_entries":
@@ -329,6 +738,27 @@ def execute_tool(tool_name: str, tool_input: Dict) -> Dict:
         return move_entry(**tool_input)
     elif tool_name == "delete_entry":
         return delete_entry(**tool_input)
+    # Journal tools
+    elif tool_name == "write_journal":
+        return write_journal(**tool_input)
+    elif tool_name == "read_journal":
+        # Handle optional date parameter
+        date_str = tool_input.get("date")
+        return read_journal(date_str)
+    elif tool_name == "search_journal":
+        return search_journal(**tool_input)
+    # Reminder tools
+    elif tool_name == "create_reminder":
+        return create_reminder(**tool_input)
+    elif tool_name == "list_reminders":
+        # Handle optional status parameter
+        status = tool_input.get("status")
+        return list_reminders(status)
+    # Cross-reference tools
+    elif tool_name == "link_entries":
+        return link_entries(**tool_input)
+    elif tool_name == "get_audio_file":
+        return get_audio_file(**tool_input)
     else:
         return {
             "success": False,
