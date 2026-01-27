@@ -56,9 +56,10 @@ Journal/Diary (3):
 - read_journal: Read journal for specific date
 - search_journal: Search across all journal entries
 
-Reminders (2):
+Reminders (3):
 - create_reminder: Set time-based reminders (default: tomorrow 9 AM)
 - list_reminders: Show pending/upcoming reminders
+- complete_reminder: Mark a reminder as done (needs reminder_id, optional note)
 
 Cross-reference (2):
 - link_entries: Connect journal entry to knowledge entry
@@ -80,6 +81,12 @@ REMINDER HANDLING:
 - "Remind me X" → create_reminder (default: tomorrow 9 AM)
 - "Remind me X at 3pm" → create_reminder with specific time
 - "Remind me X daily/weekly/monthly" → create_reminder with repeat
+- "Mark my X reminder as done" → list_reminders to find it, then complete_reminder
+
+DIARY-REMINDER INTEGRATION:
+- When write_journal returns "auto_completed_reminders", mention naturally which reminders were auto-completed (e.g., "By the way, I've marked your 'call dentist' reminder as done since you mentioned doing it.")
+- When write_journal returns "relevant_reminders", briefly mention the connection (e.g., "This relates to your upcoming reminder about...")
+- Keep these mentions natural and brief, not mechanical.
 
 Be concise and natural. Confirm actions. Voice messages are often diary-like."""
 
@@ -102,12 +109,16 @@ async def process_message_with_agent(chat_id: int, user_message: str, telegram_m
 
     logger.info(f"Processing message with {len(history)} history messages")
 
+    # Build system prompt with current time so agent can calculate relative times
+    now = datetime.now()
+    system_prompt = f"{AGENT_SYSTEM_PROMPT}\n\nCURRENT LOCAL TIME: {now.strftime('%Y-%m-%d %H:%M:%S')} ({now.strftime('%A')})"
+
     # Call Claude with tools (agentic loop)
     try:
         response = get_client().messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=4096,
-            system=AGENT_SYSTEM_PROMPT,
+            system=system_prompt,
             tools=TOOL_DEFINITIONS,
             messages=messages
         )
@@ -160,7 +171,7 @@ async def process_message_with_agent(chat_id: int, user_message: str, telegram_m
             response = get_client().messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=4096,
-                system=AGENT_SYSTEM_PROMPT,
+                system=system_prompt,
                 tools=TOOL_DEFINITIONS,
                 messages=messages
             )

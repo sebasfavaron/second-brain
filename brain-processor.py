@@ -17,6 +17,7 @@ from config import (
     TELEGRAM_TOKEN,
     CATEGORIES,
     DIGEST_HOUR,
+    REVIEW_HOUR,
     ANTHROPIC_API_KEY,
 )
 from storage import (
@@ -31,6 +32,7 @@ from storage import (
     set_state,
 )
 import reminder_storage
+import journal_storage
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -307,6 +309,35 @@ async def run_corrections() -> None:
         logger.info("No corrections to process")
 
 
+def _get_recent_diary_context(days: int = 3) -> str:
+    """Get diary content from the last N days."""
+    from datetime import date as date_type
+    entries = []
+    for i in range(days):
+        target = date_type.today() - timedelta(days=i)
+        journal = journal_storage.read_journal(target)
+        if journal.get("exists") and journal.get("content"):
+            entries.append(f"[{target.isoformat()}]\n{journal['content']}")
+    return "\n\n".join(entries)
+
+
+def _get_related_knowledge(reminder: dict) -> list:
+    """Search knowledge base for entries related to a reminder."""
+    content = reminder.get("content", "")
+    if not content:
+        return []
+
+    try:
+        from agent_tools import search_entries
+        result = search_entries(content, limit=3)
+        if result.get("success"):
+            return result.get("entries", [])
+    except Exception as e:
+        logger.warning(f"Knowledge search failed: {e}")
+
+    return []
+
+
 async def process_reminders(bot: Bot, chat_id: int) -> int:
     """
     Process triggered reminders and send notifications.
@@ -316,19 +347,30 @@ async def process_reminders(bot: Bot, chat_id: int) -> int:
     """
     triggered = reminder_storage.process_triggered_reminders()
 
+    # Get diary context once for all reminders
+    recent_diary = ""
+    if triggered:
+        try:
+            recent_diary = _get_recent_diary_context(days=3)
+        except Exception as e:
+            logger.warning(f"Failed to get diary context: {e}")
+
     for reminder in triggered:
         content = reminder.get("content", "")
         reminder_id = reminder.get("id", "")
 
-        # Build notification message - use HTML
-        content_html = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        message = f"🔔 <b>Recordatorio</b>\n\n{content_html}"
+        # Enrich reminder with diary/knowledge context
+        enriched_content = content
+        try:
+            from diary_reminder_bridge import enrich_reminder_delivery
+            related = _get_related_knowledge(reminder)
+            enriched_content = enrich_reminder_delivery(reminder, recent_diary, related)
+        except Exception as e:
+            logger.warning(f"Reminder enrichment failed: {e}")
 
-        # Add linked entry info if available
-        ref_id = reminder.get("reference_entry_id")
-        if ref_id:
-            ref_id_html = ref_id.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-            message += f"\n\n<i>ID: {ref_id_html}</i>"
+        # Build notification message - use HTML
+        enriched_html = enriched_content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        message = f"🔔 <b>Recordatorio</b>\n\n{enriched_html}"
 
         # Send notification
         try:
@@ -337,7 +379,7 @@ async def process_reminders(bot: Bot, chat_id: int) -> int:
                 text=message,
                 parse_mode="HTML"
             )
-            logger.info(f"Sent reminder notification: {content[:50]}")
+            logger.info(f"Sent enriched reminder: {content[:50]}")
         except Exception as e:
             logger.error(f"Failed to send reminder {reminder_id}: {e}")
 
@@ -359,6 +401,53 @@ async def run_reminders(chat_id: int) -> None:
         logger.info("No reminders to trigger")
 
 
+async def run_daily_review(chat_id: int) -> None:
+    """Run daily review: generate follow-up suggestions and send reflection message."""
+    if not TELEGRAM_TOKEN:
+        raise ValueError("TELEGRAM_TOKEN not set")
+
+    bot = Bot(token=TELEGRAM_TOKEN)
+    init_storage()
+
+    try:
+        from diary_reminder_bridge import generate_follow_up_suggestions
+
+        recent_diary = _get_recent_diary_context(days=3)
+        pending = reminder_storage.list_reminders(status="pending")
+
+        suggestions = generate_follow_up_suggestions(recent_diary, pending)
+
+        if not suggestions:
+            logger.info("No follow-up suggestions generated")
+            return
+
+        # Build message
+        lines = ["🌙 <b>Reflexión del día</b>\n"]
+        for s in suggestions[:3]:
+            suggestion_text = s.get("suggestion", "")
+            suggestion_html = suggestion_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            s_type = s.get("type", "")
+            type_icon = {
+                "follow_up": "📋",
+                "pattern": "🔄",
+                "nudge": "👋",
+                "action": "⚡"
+            }.get(s_type, "💡")
+            lines.append(f"{type_icon} {suggestion_html}")
+
+        message = "\n\n".join(lines)
+
+        await bot.send_message(
+            chat_id=chat_id,
+            text=message,
+            parse_mode="HTML"
+        )
+        logger.info(f"Sent daily review to {chat_id}")
+
+    except Exception as e:
+        logger.error(f"Daily review failed: {e}")
+
+
 def main():
     """Entry point."""
     import sys
@@ -369,11 +458,12 @@ def main():
     parser.add_argument("--digest", action="store_true", help="Send daily digest")
     parser.add_argument("--corrections", action="store_true", help="Process corrections queue")
     parser.add_argument("--reminders", action="store_true", help="Process triggered reminders")
+    parser.add_argument("--review", action="store_true", help="Run daily review/reflection")
 
     args = parser.parse_args()
 
-    # Default to all if none specified
-    if not args.digest and not args.corrections and not args.reminders:
+    # Default to all if none specified (excluding review, which is opt-in)
+    if not args.digest and not args.corrections and not args.reminders and not args.review:
         args.digest = True
         args.corrections = True
         args.reminders = True
@@ -387,6 +477,9 @@ def main():
 
         if args.digest:
             asyncio.run(run_digest(args.chat_id))
+
+        if args.review:
+            asyncio.run(run_daily_review(args.chat_id))
     except Exception as e:
         logger.error(f"Error: {e}")
         sys.exit(1)

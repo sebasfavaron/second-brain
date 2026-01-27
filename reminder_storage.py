@@ -288,3 +288,30 @@ def get_upcoming_reminders(days: int = 7) -> List[Dict]:
 def complete_reminder(reminder_id: str) -> bool:
     """Mark a reminder as completed."""
     return update_reminder_status(reminder_id, "completed")
+
+
+def add_completion_note(reminder_id: str, note: str, auto_completed: bool = False) -> bool:
+    """
+    Add a completion note to a reminder and mark it completed.
+
+    Args:
+        reminder_id: The reminder ID
+        note: Why the reminder was completed (e.g., "Diary entry confirmed task done")
+        auto_completed: Whether this was auto-completed by the system
+
+    Returns:
+        True if successful, False if reminder not found
+    """
+    reminders = load_reminders()
+
+    for reminder in reminders:
+        if reminder.get("id") == reminder_id:
+            reminder["status"] = "completed"
+            reminder["completed_at"] = datetime.now().isoformat()
+            reminder["updated_at"] = datetime.now().isoformat()
+            reminder["completion_note"] = note
+            reminder["auto_completed"] = auto_completed
+            save_reminders(reminders)
+            return True
+
+    return False

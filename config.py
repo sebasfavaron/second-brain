@@ -54,3 +54,6 @@ WHISPER_MODEL = "base"  # Options: tiny, base, small, medium, large
 
 # Default reminder time (when not specified)
 DEFAULT_REMINDER_HOUR = 9  # 9 AM next day
+
+# Daily review/reflection time
+REVIEW_HOUR = 21  # 9 PM daily review
