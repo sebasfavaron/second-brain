@@ -7,7 +7,7 @@ Handles text, voice messages, reminders, and cross-references.
 import logging
 import json
 from datetime import datetime, date, timedelta
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.ext import Application, MessageHandler, ContextTypes, filters, CommandHandler
 
 from config import TELEGRAM_TOKEN, ANTHROPIC_API_KEY
@@ -496,6 +496,22 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.error(f"Update {update} caused error {context.error}")
 
 
+async def post_init(application: Application) -> None:
+    """Initialize bot commands after application startup."""
+    commands = [
+        BotCommand("help", "Muestra ayuda y comandos disponibles"),
+        BotCommand("today", "Diario de hoy + recordatorios"),
+        BotCommand("day", "Diario de fecha específica (YYYY-MM-DD)"),
+        BotCommand("search", "Busca en diario y conocimiento"),
+        BotCommand("reminders", "Lista recordatorios pendientes"),
+        BotCommand("inbox", "Items de baja confianza para revisar"),
+        BotCommand("reset", "Limpia historial de conversación"),
+    ]
+
+    await application.bot.set_my_commands(commands)
+    logger.info("Bot commands configured for autocomplete")
+
+
 def main():
     """Start the bot."""
     if not TELEGRAM_TOKEN:
@@ -508,7 +524,7 @@ def main():
     init_storage()
 
     # Build application
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
     # Command handlers
     app.add_handler(CommandHandler("help", handle_help))
