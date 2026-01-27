@@ -359,9 +359,10 @@ Record and send a voice message - it will be transcribed and stored.
 Try each command:
 - `/help` - Full command list
 - `/today` - Today's journal and reminders
-- `/search birthday` - Search your knowledge base
+- `/search birthday` - Semantic search across all content
 - `/reminders` - See upcoming reminders
 - `/inbox` - Review low-confidence items
+- `/export` - Download complete backup (recommended to test!)
 
 ### 4. Review Your Data
 
@@ -388,7 +389,22 @@ cat brain/people.json
 cat journal/entries/$(date +%Y/%m/%d).md
 ```
 
-### 5. Customize Settings
+### 5. Backup Your Data
+
+**Important:** Regularly backup your data!
+
+```
+/export
+```
+
+This creates a complete ZIP backup and sends it via Telegram. The backup includes:
+- All knowledge base entries (brain/*.json)
+- All journal entries and audio files
+- Embeddings and indexes
+
+**Recommended:** Run `/export` weekly or after adding important entries.
+
+### 6. Customize Settings
 
 Edit `config.py` to adjust:
 ```python

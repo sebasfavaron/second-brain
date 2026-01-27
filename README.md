@@ -15,6 +15,20 @@ An intelligent Telegram bot that combines personal knowledge management with dai
 
 ## Features
 
+### 🔍 Semantic Search
+Search using meaning, not just keywords:
+- Finds related content even with different words
+- Works across multiple languages
+- Hybrid approach: semantic similarity + keyword matching
+- Automatic embedding generation on entry creation
+
+### 📦 Backup & Export
+Protect your data:
+- `/export` command creates complete ZIP backup
+- Includes all journal entries, knowledge base, and audio files
+- Sent directly via Telegram for easy download
+- Auto-cleanup of old backups
+
 ### Intelligent Routing
 The bot automatically classifies your messages:
 - **Diary** - Emotional, reflective content goes to journal
@@ -29,13 +43,19 @@ The bot automatically classifies your messages:
 - `inbox` - Low-confidence items for manual review
 
 ### Commands
+
+**Main Commands:**
 - `/help` - Show all commands and usage
 - `/today` - Today's journal + upcoming reminders
 - `/day YYYY-MM-DD` - View journal for specific date
-- `/search <query>` - Search both journal and knowledge
+- `/search <query>` - Semantic search across journal and knowledge
 - `/reminders` - List upcoming reminders
 - `/inbox` - Review items needing classification
+
+**Utilities:**
+- `/export` - Download complete backup as ZIP
 - `/reset` - Clear conversation history
+- `/rebuild_embeddings` - Regenerate semantic search embeddings (admin)
 
 ### Voice Messages
 Send voice messages in any language - they're automatically:

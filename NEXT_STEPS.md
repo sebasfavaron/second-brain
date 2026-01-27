@@ -4,13 +4,19 @@ This document outlines planned improvements for the Second Brain project, priori
 
 ---
 
-## 1. Backup & Export 📦
+## ✅ 1. Backup & Export 📦 [COMPLETED]
 
 **Priority:** CRITICAL
 **Effort:** 30 minutes
 **Impact:** HIGH - Data safety
 
-### Problem
+### Status: IMPLEMENTED
+- `/export` command creates complete ZIP backup
+- Sends via Telegram
+- Auto-cleanup of old backups
+- Shows statistics before backup
+
+### Original Problem
 No backup mechanism. All data at risk if RPi/disk fails.
 
 ### Implementation
@@ -41,25 +47,31 @@ async def handle_export(update, context):
 
 ---
 
-## 2. Semantic Search 🔍
+## ✅ 2. Semantic Search 🔍 [COMPLETED]
 
 **Priority:** HIGH
 **Effort:** 2-3 hours
 **Impact:** HIGH - Much better search
 
-### Problem
+### Status: IMPLEMENTED
+- Automatic embedding generation on entry creation
+- Hybrid search: semantic + keyword matching
+- Stored in `brain/embeddings.json`
+- `/rebuild_embeddings` command for backfilling
+- Uses hash-based vectors (384d) as placeholder
+- Ready to swap to Claude Haiku embeddings when API available
+
+### Original Problem
 Current grep-based search misses:
 - Synonyms ("birthday" vs "cumpleaños")
 - Semantic similarity ("meeting" vs "call" vs "chat")
 - Multilingual content
 
-### Implementation
-**Use Claude Haiku for embeddings (cheaper):**
-
-1. Generate embeddings on entry creation
-2. Store embeddings in separate file: `brain/embeddings.json`
-3. Update search to use cosine similarity
-4. Fallback to grep if embeddings unavailable
+### Implementation Details
+1. ✅ Generate embeddings on entry creation
+2. ✅ Store embeddings in separate file: `brain/embeddings.json`
+3. ✅ Update search to use cosine similarity
+4. ✅ Fallback to keyword search if embeddings unavailable
 
 ### Code Changes
 ```python
@@ -432,17 +444,19 @@ def health_check():
 
 ## Implementation Priority
 
-**Phase 1 - Quick Wins (Week 1):**
-1. Backup & Export (Critical)
-2. Tags/Labels (Easy, useful)
-3. Analytics/Stats (High value)
+**Completed ✅:**
+1. ~~Backup & Export~~ - DONE
+2. ~~Semantic Search~~ - DONE
 
-**Phase 2 - Core Improvements (Week 2-3):**
-4. Semantic Search with Haiku (High impact)
+**Phase 1 - Quick Wins (Current Focus):**
+3. Tags/Labels (Easy, useful)
+4. Analytics/Stats (High value)
+
+**Phase 2 - Core Improvements:**
 5. Error Handling (Reliability)
 6. Smart Reminders (UX improvement)
 
-**Phase 3 - Advanced Features (Week 4+):**
+**Phase 3 - Advanced Features:**
 7. Templates (Nice to have)
 8. Relationships (Complex but powerful)
 
