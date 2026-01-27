@@ -256,49 +256,49 @@ async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not update.message:
         return
 
-    help_text = """🧠 **Unified Brain + Diary Bot**
+    help_text = """🧠 <b>Unified Brain + Diary Bot</b>
 
 Tu asistente personal para gestión de conocimiento y diario/journal.
 
-**📝 Tipos de Mensajes:**
-• **Diario** - Reflexiones, emociones, logs diarios
-  _Ej: "Hoy fue un día difícil"_
+<b>📝 Tipos de Mensajes:</b>
+• <b>Diario</b> - Reflexiones, emociones, logs diarios
+  <i>Ej: "Hoy fue un día difícil"</i>
 
-• **Conocimiento** - Hechos, personas, proyectos, admin
-  _Ej: "Cumpleaños de Felipe: 15 de marzo"_
+• <b>Conocimiento</b> - Hechos, personas, proyectos, admin
+  <i>Ej: "Cumpleaños de Felipe: 15 de marzo"</i>
 
-• **Híbrido** - Diario + hechos extraíbles
-  _Ej: "Gran reunión con Juan, deadline viernes"_
+• <b>Híbrido</b> - Diario + hechos extraíbles
+  <i>Ej: "Gran reunión con Juan, deadline viernes"</i>
 
-• **Recordatorio** - Avisos con tiempo
-  _Ej: "Recuérdame llamar al dentista mañana 3pm"_
+• <b>Recordatorio</b> - Avisos con tiempo
+  <i>Ej: "Recuérdame llamar al dentista mañana 3pm"</i>
 
-**🗣️ Voz:**
+<b>🗣️ Voz:</b>
 Envía mensajes de voz - se transcriben y procesan automáticamente.
 
-**📋 Comandos:**
+<b>📋 Comandos:</b>
 /help - Muestra esta ayuda
 /today - Diario de hoy + recordatorios
 /day YYYY-MM-DD - Diario de fecha específica
-/search <query> - Busca en diario y conocimiento
+/search &lt;query&gt; - Busca en diario y conocimiento
 /reminders - Lista recordatorios pendientes
 /inbox - Items de baja confianza para revisar
 /reset - Limpia historial de conversación
 
-**📂 Categorías de Conocimiento:**
+<b>📂 Categorías de Conocimiento:</b>
 • people - Personas, relaciones, hechos
 • projects - Trabajo, tareas, deadlines
 • ideas - Pensamientos creativos, insights
 • admin - Logística, citas, ubicaciones
 • inbox - Clasificación pendiente
 
-**💡 Ejemplos:**
+<b>💡 Ejemplos:</b>
 "Hoy me sentí motivado después de la charla"
 "Felipe cumpleaños marzo 15"
 "Recuérdame revisar el reporte mañana 9am"
 🎤 [mensaje de voz]"""
 
-    await update.message.reply_text(help_text, parse_mode="Markdown")
+    await update.message.reply_text(help_text, parse_mode="HTML")
     logger.info(f"Sent help to chat_id={update.message.chat_id}")
 
 
@@ -325,27 +325,30 @@ async def handle_today(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # Get today's reminders
         reminders = reminder_storage.get_upcoming_reminders(days=1)
 
-        response = "📅 **Hoy**\n\n"
+        response = "📅 <b>Hoy</b>\n\n"
 
         # Journal section
         if journal.get("exists"):
             content = journal.get("content", "")
-            # Show first 500 chars
-            preview = content[:500] + ("..." if len(content) > 500 else "")
-            response += f"**Diario:**\n{preview}\n\n"
+            # Show first 500 chars - escape HTML
+            preview = content[:500].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            if len(content) > 500:
+                preview += "..."
+            response += f"<b>Diario:</b>\n{preview}\n\n"
         else:
-            response += "**Diario:** Sin entradas hoy\n\n"
+            response += "<b>Diario:</b> Sin entradas hoy\n\n"
 
         # Reminders section
         if reminders:
-            response += f"**Recordatorios ({len(reminders)}):**\n"
+            response += f"<b>Recordatorios ({len(reminders)}):</b>\n"
             for r in reminders[:5]:
                 trigger = datetime.fromisoformat(r["trigger_time"])
-                response += f"• {trigger.strftime('%H:%M')} - {r['content']}\n"
+                content = r['content'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                response += f"• {trigger.strftime('%H:%M')} - {content}\n"
         else:
-            response += "**Recordatorios:** Ninguno"
+            response += "<b>Recordatorios:</b> Ninguno"
 
-        await update.message.reply_text(response)
+        await update.message.reply_text(response, parse_mode="HTML")
 
     except Exception as e:
         logger.error(f"Error in /today: {e}")
@@ -395,36 +398,39 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         if not context.args:
-            await update.message.reply_text("Uso: /search <query>")
+            await update.message.reply_text("Uso: /search &lt;query&gt;", parse_mode="HTML")
             return
 
         query = " ".join(context.args)
+        query_escaped = query.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
         # Search journal
         journal_matches = journal_storage.search_journal(query)
 
         # Search knowledge (via agent to get formatted results)
-        response = f"🔍 Buscando: '{query}'\n\n"
+        response = f"🔍 Buscando: '{query_escaped}'\n\n"
 
         # Journal results
         if journal_matches:
-            response += f"**Diario ({len(journal_matches)} entradas):**\n"
+            response += f"<b>Diario ({len(journal_matches)} entradas):</b>\n"
             for match in journal_matches[:3]:
                 response += f"• {match['date']}\n"
             if len(journal_matches) > 3:
                 response += f"...y {len(journal_matches) - 3} más\n"
             response += "\n"
         else:
-            response += "**Diario:** Sin resultados\n\n"
+            response += "<b>Diario:</b> Sin resultados\n\n"
 
         # Use agent to search knowledge
         chat_id = update.message.chat_id
         search_request = f"Busca '{query}' en las categorías del conocimiento"
         knowledge_response = await process_message_with_agent(chat_id, search_request, update.message.message_id)
 
-        response += f"**Conocimiento:**\n{knowledge_response}"
+        # Escape knowledge response
+        knowledge_escaped = knowledge_response.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        response += f"<b>Conocimiento:</b>\n{knowledge_escaped}"
 
-        await update.message.reply_text(response)
+        await update.message.reply_text(response, parse_mode="HTML")
 
     except Exception as e:
         logger.error(f"Error in /search: {e}")
@@ -443,7 +449,7 @@ async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await update.message.reply_text("📝 No hay recordatorios pendientes")
             return
 
-        response = f"📝 **Recordatorios ({len(reminders)}):**\n\n"
+        response = f"📝 <b>Recordatorios ({len(reminders)}):</b>\n\n"
 
         for r in reminders[:10]:
             trigger = datetime.fromisoformat(r["trigger_time"])
@@ -457,12 +463,13 @@ async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 when = trigger.strftime('%Y-%m-%d %H:%M')
 
             repeat_icon = "🔁" if r.get("repeat") != "none" else ""
-            response += f"{repeat_icon} {when}\n  {r['content']}\n\n"
+            content = r['content'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            response += f"{repeat_icon} {when}\n  {content}\n\n"
 
         if len(reminders) > 10:
             response += f"...y {len(reminders) - 10} más"
 
-        await update.message.reply_text(response)
+        await update.message.reply_text(response, parse_mode="HTML")
 
     except Exception as e:
         logger.error(f"Error in /reminders: {e}")
