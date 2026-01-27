@@ -251,6 +251,57 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await message.reply_text(f"❌ Error: {e}")
 
 
+async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /help command - show usage information."""
+    if not update.message:
+        return
+
+    help_text = """🧠 **Unified Brain + Diary Bot**
+
+Tu asistente personal para gestión de conocimiento y diario/journal.
+
+**📝 Tipos de Mensajes:**
+• **Diario** - Reflexiones, emociones, logs diarios
+  _Ej: "Hoy fue un día difícil"_
+
+• **Conocimiento** - Hechos, personas, proyectos, admin
+  _Ej: "Cumpleaños de Felipe: 15 de marzo"_
+
+• **Híbrido** - Diario + hechos extraíbles
+  _Ej: "Gran reunión con Juan, deadline viernes"_
+
+• **Recordatorio** - Avisos con tiempo
+  _Ej: "Recuérdame llamar al dentista mañana 3pm"_
+
+**🗣️ Voz:**
+Envía mensajes de voz - se transcriben y procesan automáticamente.
+
+**📋 Comandos:**
+/help - Muestra esta ayuda
+/today - Diario de hoy + recordatorios
+/day YYYY-MM-DD - Diario de fecha específica
+/search <query> - Busca en diario y conocimiento
+/reminders - Lista recordatorios pendientes
+/inbox - Items de baja confianza para revisar
+/reset - Limpia historial de conversación
+
+**📂 Categorías de Conocimiento:**
+• people - Personas, relaciones, hechos
+• projects - Trabajo, tareas, deadlines
+• ideas - Pensamientos creativos, insights
+• admin - Logística, citas, ubicaciones
+• inbox - Clasificación pendiente
+
+**💡 Ejemplos:**
+"Hoy me sentí motivado después de la charla"
+"Felipe cumpleaños marzo 15"
+"Recuérdame revisar el reporte mañana 9am"
+🎤 [mensaje de voz]"""
+
+    await update.message.reply_text(help_text, parse_mode="Markdown")
+    logger.info(f"Sent help to chat_id={update.message.chat_id}")
+
+
 async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /reset command to clear conversation history."""
     if not update.message:
@@ -453,6 +504,7 @@ def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
     # Command handlers
+    app.add_handler(CommandHandler("help", handle_help))
     app.add_handler(CommandHandler("reset", handle_reset))
     app.add_handler(CommandHandler("today", handle_today))
     app.add_handler(CommandHandler("day", handle_day))
