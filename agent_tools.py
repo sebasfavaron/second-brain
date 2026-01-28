@@ -29,6 +29,7 @@ from config import (
 import journal_storage
 import reminder_storage
 import skills_manager
+import deploy_manager
 
 
 # Tool definitions for Claude API
@@ -536,6 +537,20 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {"name": {"type": "string", "description": "Skill name"}},
             "required": ["name"]
+        }
+    },
+    {
+        "name": "deploy_remote",
+        "description": "Commit+push changes and then pull+restart on the configured SSH remote.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "Commit message (optional)"
+                }
+            },
+            "required": []
         }
     }
 ]
@@ -1325,6 +1340,11 @@ def remove_skill(name: str) -> Dict:
     return skills_manager.remove_skill(name)
 
 
+def deploy_remote(message: Optional[str] = None) -> Dict:
+    """Deploy changes to the remote defined in .deploy."""
+    return deploy_manager.deploy_remote(commit_message=message)
+
+
 # Tool execution dispatcher
 def execute_tool(tool_name: str, tool_input: Dict) -> Dict:
     """Execute a tool by name with given input."""
@@ -1396,6 +1416,8 @@ def execute_tool(tool_name: str, tool_input: Dict) -> Dict:
         return disable_skill(**tool_input)
     elif tool_name == "remove_skill":
         return remove_skill(**tool_input)
+    elif tool_name == "deploy_remote":
+        return deploy_remote(**tool_input)
     else:
         return {
             "success": False,
