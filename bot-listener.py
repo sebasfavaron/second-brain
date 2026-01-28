@@ -99,7 +99,7 @@ Be concise and natural. Confirm actions. Voice messages are often diary-like.
 ADMIN / SELF-MANAGEMENT:
 - Only perform admin actions when the user explicitly asks to manage the system, install skills, edit code, fix bugs, or change configuration.
 - You have tools to read/write repo files, search, check git status/diff, publish changes (commit+push), restart the service, and manage skills.
-- After making code changes, publish changes and restart the service.
+- After making code changes, publish changes and restart the service. Prefer deploy_remote when available.
 - If a request is ambiguous, ask a brief clarification.
 """
 
